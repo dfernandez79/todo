@@ -1,0 +1,62 @@
+{
+  "name": "@diegoux/todo",
+  "version": "0.1.0",
+  "description": "A to-do list CLI for coding agents, stored in SQLite or PostgreSQL.",
+  "license": "MIT",
+  "author": "Diego Fernandez",
+  "bin": {
+    "todo": "./dist/todo.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "start": "bun run src/todo.ts",
+    "build": "bunup",
+    "test": "bun test",
+    "test:unit": "SKIP_DB_TESTS=1 bun test",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
+    "prepare": "bun run husky",
+    "prepack": "bun run build"
+  },
+  "dependencies": {
+    "kysely": "^0.29.6",
+    "kysely-postgres-js": "^5.0.1",
+    "postgres": "^3.4.9"
+  },
+  "devDependencies": {
+    "@diegoux/oxc-config": "^0.1.0",
+    "@testcontainers/postgresql": "^12.2.0",
+    "@types/bun": "^1.4.2",
+    "bunup": "^0.16.32",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.6.0",
+    "oxfmt": "^0.72.0",
+    "oxlint": "^1.87.0",
+    "typescript": "^7"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx,mjs,cjs}": [
+      "oxlint --fix",
+      "oxfmt --no-error-on-unmatched-pattern"
+    ],
+    "*.{json,jsonc,md,mdx,toml,yml,yaml}": "oxfmt --no-error-on-unmatched-pattern"
+  },
+  "engines": {
+    "node": ">=22.16"
+  }
+}

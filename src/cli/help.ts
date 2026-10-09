@@ -1,0 +1,62 @@
+import { type Command, DB_COMMANDS, ITEM_COMMANDS, LIST_COMMANDS } from "./commands.ts";
+import type { OptionName } from "./options.ts";
+
+const OPTION_HELP: Record<OptionName, string> = {
+  list: "--list=<key>, -l      The List to work on (default: $TODO_LIST, or 'default')",
+  section: "--section=<name>, -s  The Section",
+  priority: "--priority=<p>, -p    The Priority: high, medium, low (none to clear or filter)",
+  notes: "--notes=<text>, -n    The Item's longer notes",
+  description: "--description=<text>  The List's description",
+  all: "--all, -a             Include Done Items",
+  "all-items": "--all-items           Every pending Item of the List",
+  done: "--done, --done=true   Mark the Item done",
+  "not-done": "--not-done, --done=false  Mark the Item pending",
+  archived: "--archived            Include Archived Lists",
+  force: "--force, -f           Also remove the List's Items",
+  json: "--json                Print JSON (or set TODO_FORMAT=json)",
+  db: "--db=<url|path>       A postgres:// URL or SQLite file (default: $TODO_DATABASE_URL, or ~/.todo/todo.db)",
+  help: "--help, -h            Show help",
+};
+
+const GLOBAL_OPTIONS: readonly OptionName[] = ["json", "db", "help"];
+
+const commandLines = (prefix: string, commands: readonly Command[]): string[] => {
+  const names = commands.map(command =>
+    [`${prefix}${command.name}`, ...command.aliases].join(", "),
+  );
+  const width = Math.max(...names.map(name => name.length));
+  return commands.map((command, i) => `  ${names[i]!.padEnd(width)}  ${command.summary}`);
+};
+
+const GENERAL_HELP = `todo: a to-do list for coding agents
+
+Usage: todo [<command>] [<arguments>] [options]
+
+Item commands, on the List from --list, $TODO_LIST, or 'default':
+${commandLines("", ITEM_COMMANDS).join("\n")}
+
+List commands:
+${commandLines("list ", LIST_COMMANDS).join("\n")}
+
+Database commands:
+${commandLines("db ", DB_COMMANDS).join("\n")}
+
+Options for every command:
+${GLOBAL_OPTIONS.map(name => `  ${OPTION_HELP[name]}`).join("\n")}
+
+Run 'todo <command> --help' for a command's options, and 'todo guide' for a
+guide to using todo from an agent.
+`;
+
+const commandHelp = (prefix: string, command: Command): string => {
+  const aliases = command.aliases.length === 0 ? "" : `\nAliases: ${command.aliases.join(", ")}\n`;
+  const options = [...command.options, ...GLOBAL_OPTIONS]
+    .map(name => `  ${OPTION_HELP[name]}`)
+    .join("\n");
+  return `Usage: todo ${prefix}${command.name} ${command.usage}\n\n${command.summary}\n${aliases}\nOptions:\n${options}\n`;
+};
+
+const groupHelp = (group: string, commands: readonly Command[]): string =>
+  `Usage: todo ${group} <command> [<arguments>] [options]\n\n${commandLines(`${group} `, commands).join("\n")}\n`;
+
+export { GENERAL_HELP, GLOBAL_OPTIONS, commandHelp, groupHelp };
