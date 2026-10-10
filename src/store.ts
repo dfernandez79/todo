@@ -50,8 +50,10 @@ const todoListStore = async (database: string, options: StoreOptions = {}): Prom
 const migrateStore = (store: TodoStore): Promise<void> => migrate(store.db);
 
 /** Runs `work` in one transaction, with a context bound to it. */
-const inTransaction = <T>(context: StoreContext, work: (tx: StoreContext) => Promise<T>) =>
-  context.db.transaction().execute(trx => work({ ...context, db: trx }));
+const inTransaction = <T>(
+  context: StoreContext,
+  work: (tx: StoreContext) => Promise<T>,
+): Promise<T> => context.db.transaction().execute(trx => work({ ...context, db: trx }));
 
 export {
   inTransaction,

@@ -54,7 +54,11 @@ type ItemChanges = {
 const blankToUndefined = (text: string): string | undefined =>
   text.trim() === "" ? undefined : text;
 
-const addItem = (list: TodoList, description: string, options: AddItemOptions = {}) =>
+const addItem = (
+  list: TodoList,
+  description: string,
+  options: AddItemOptions = {},
+): Promise<Item> =>
   inTransaction(list.store, async tx => {
     const row = await ensureWritableListRow(tx, list.key);
     const item = await insertItemRow(tx, row, {
@@ -104,7 +108,7 @@ const applyChanges = (draft: ItemDraft, changes: ItemChanges, now: string): Item
   return next;
 };
 
-const editItem = (list: TodoList, id: number, changes: ItemChanges) =>
+const editItem = (list: TodoList, id: number, changes: ItemChanges): Promise<Item> =>
   inTransaction(list.store, async tx => {
     const row = await getActiveListRow(tx, list.key);
     const [item] = await getItemRows(tx, row, [id]);
@@ -123,14 +127,14 @@ const markRowsDone = async (tx: StoreContext, row: ListRow, items: readonly Item
 };
 
 /** Marks Items Done; ones already Done keep their done time. */
-const markDone = (list: TodoList, ids: readonly number[]) =>
+const markDone = (list: TodoList, ids: readonly number[]): Promise<Item[]> =>
   inTransaction(list.store, async tx => {
     const row = await getActiveListRow(tx, list.key);
     return markRowsDone(tx, row, await getItemRows(tx, row, ids));
   });
 
 /** Marks Done the pending Items of a Section, or of the whole List; returns those. */
-const markAllDone = (list: TodoList, options: { section?: string } = {}) =>
+const markAllDone = (list: TodoList, options: { section?: string } = {}): Promise<Item[]> =>
   inTransaction(list.store, async tx => {
     const row = await getActiveListRow(tx, list.key);
     const section = options.section?.trim();
@@ -153,7 +157,7 @@ const deleteRows = async ({ db }: StoreContext, rows: readonly ItemRow[]) => {
 };
 
 /** Removes Items, returning them as they were. */
-const removeItems = (list: TodoList, ids: readonly number[]) =>
+const removeItems = (list: TodoList, ids: readonly number[]): Promise<Item[]> =>
   inTransaction(list.store, async tx => {
     const row = await getActiveListRow(tx, list.key);
     const rows = await getItemRows(tx, row, ids);
@@ -207,11 +211,11 @@ const transferItems = (list: TodoList, ids: readonly number[], targetKey: string
   });
 
 /** Copies Items to another List, merging Duplicate Items; returns them as in the target. */
-const copyItems = (list: TodoList, ids: readonly number[], targetKey: string) =>
+const copyItems = (list: TodoList, ids: readonly number[], targetKey: string): Promise<Item[]> =>
   transferItems(list, ids, targetKey, false);
 
 /** Like `copyItems`, then removes the source Items. */
-const moveItems = (list: TodoList, ids: readonly number[], targetKey: string) =>
+const moveItems = (list: TodoList, ids: readonly number[], targetKey: string): Promise<Item[]> =>
   transferItems(list, ids, targetKey, true);
 
 type PromptSelection = { ids?: readonly number[]; section?: string };

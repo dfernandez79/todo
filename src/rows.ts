@@ -38,7 +38,8 @@ const toDraft = (row: ItemRow): ItemDraft => {
   return { description, notes, section, priority, doneAt };
 };
 
-const listNotFound = (key: string) => new TodoError("LIST_NOT_FOUND", `list '${key}' not found`);
+const listNotFound = (key: string): TodoError =>
+  new TodoError("LIST_NOT_FOUND", `list '${key}' not found`);
 
 const assertNotArchived = (row: ListRow): ListRow => {
   if (row.archived_at !== null) {
@@ -195,18 +196,28 @@ const updateItemRow = async (
     .executeTakeFirstOrThrow();
 };
 
-const loadListRows = ({ db }: StoreContext, options: { archived: boolean }) => {
+const loadListRows = ({ db }: StoreContext, options: { archived: boolean }): Promise<ListRow[]> => {
   const query = db.selectFrom("todo_lists").selectAll().orderBy("key");
   return (options.archived ? query : query.where("archived_at", "is", null)).execute();
 };
 
-const setListDescription = (context: StoreContext, list: ListRow, description?: string) =>
-  touchListRow(context, list, { description: description ?? null });
+const setListDescription = (
+  context: StoreContext,
+  list: ListRow,
+  description?: string,
+): Promise<ListRow> => touchListRow(context, list, { description: description ?? null });
 
-const setListArchivedAt = (context: StoreContext, list: ListRow, archivedAt?: string) =>
-  touchListRow(context, list, { archived_at: archivedAt ?? null });
+const setListArchivedAt = (
+  context: StoreContext,
+  list: ListRow,
+  archivedAt?: string,
+): Promise<ListRow> => touchListRow(context, list, { archived_at: archivedAt ?? null });
 
-const touchListRow = ({ db, now }: StoreContext, list: ListRow, values: Partial<ListRow> = {}) =>
+const touchListRow = (
+  { db, now }: StoreContext,
+  list: ListRow,
+  values: Partial<ListRow> = {},
+): Promise<ListRow> =>
   db
     .updateTable("todo_lists")
     .set({ ...values, updated_at: now() })

@@ -54,7 +54,11 @@ const normalizeDescription = (description: string | undefined) =>
   description === undefined || description.trim() === "" ? undefined : description.trim();
 
 /** Creates an empty List; LIST_EXISTS if the key is taken. */
-const createList = (store: TodoStore, key: string, options: { description?: string } = {}) =>
+const createList = (
+  store: TodoStore,
+  key: string,
+  options: { description?: string } = {},
+): Promise<ListSummary> =>
   inTransaction(store, async tx => {
     const listKey = parseListKey(key);
     if ((await findListRow(tx, listKey)) !== undefined) {
@@ -92,7 +96,11 @@ const showList = async (
 };
 
 /** Changes a List's description; `""` clears it. */
-const editList = (store: TodoStore, key: string, changes: { description?: string }) =>
+const editList = (
+  store: TodoStore,
+  key: string,
+  changes: { description?: string },
+): Promise<ListSummary> =>
   inTransaction(store, async tx => {
     const row = await getListRow(tx, parseListKey(key));
     if (changes.description === undefined) return summaryOf(tx, row);
@@ -108,12 +116,18 @@ const setArchived = (store: TodoStore, key: string, archived: boolean) =>
     return summaryOf(tx, updated);
   });
 
-const archiveList = (store: TodoStore, key: string) => setArchived(store, key, true);
+const archiveList = (store: TodoStore, key: string): Promise<ListSummary> =>
+  setArchived(store, key, true);
 
-const unarchiveList = (store: TodoStore, key: string) => setArchived(store, key, false);
+const unarchiveList = (store: TodoStore, key: string): Promise<ListSummary> =>
+  setArchived(store, key, false);
 
 /** Removes a List and its Items; LIST_NOT_EMPTY unless empty or forced. */
-const removeList = (store: TodoStore, key: string, options: { force?: boolean } = {}) =>
+const removeList = (
+  store: TodoStore,
+  key: string,
+  options: { force?: boolean } = {},
+): Promise<ListSummary> =>
   inTransaction(store, async tx => {
     const row = await getListRow(tx, parseListKey(key));
     const summary = await summaryOf(tx, row);
@@ -150,7 +164,7 @@ const copyRows = async (tx: StoreContext, source: ListRow, targetKey: string) =>
 };
 
 /** Copies a List's Items on top of another List, which is created if missing. */
-const copyList = (store: TodoStore, from: string, to: string) =>
+const copyList = (store: TodoStore, from: string, to: string): Promise<ListSummary> =>
   inTransaction(store, async tx => {
     const { source, target } = keysOf(from, to);
     const sourceRow = await getListRow(tx, source);
@@ -161,7 +175,7 @@ const copyList = (store: TodoStore, from: string, to: string) =>
  * Renames a List when the target doesn't exist, keeping Item IDs. Otherwise
  * copies its Items on top of the target and removes it.
  */
-const moveList = (store: TodoStore, from: string, to: string) =>
+const moveList = (store: TodoStore, from: string, to: string): Promise<ListSummary> =>
   inTransaction(store, async tx => {
     const { source, target } = keysOf(from, to);
     const sourceRow = await getListRow(tx, source);
@@ -178,7 +192,7 @@ const moveList = (store: TodoStore, from: string, to: string) =>
  * Merges the Duplicate Items of a List into the one with the lowest Item ID.
  * Returns the Items removed.
  */
-const cleanupList = (store: TodoStore, key: string) =>
+const cleanupList = (store: TodoStore, key: string): Promise<Item[]> =>
   inTransaction(store, async tx => {
     const row = await getActiveListRow(tx, parseListKey(key));
     const rows = (await loadItemRows(tx, row.id)).toSorted((a, b) => a.number - b.number);
@@ -220,7 +234,7 @@ const exportList = async (store: TodoStore, key: string): Promise<string> => {
  * missing. The Markdown's description is used only if the List has none.
  * Returns the resulting Items.
  */
-const importList = (store: TodoStore, key: string, markdown: string) =>
+const importList = (store: TodoStore, key: string, markdown: string): Promise<Item[]> =>
   inTransaction(store, async tx => {
     const parsed = parseMarkdown(markdown);
     const listKey = parseListKey(key);
