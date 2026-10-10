@@ -31,7 +31,8 @@
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
     "prepare": "bun run husky",
-    "prepack": "bun run build"
+    "prepack": "bun run build",
+    "release": "bunx np"
   },
   "dependencies": {
     "kysely": "^0.29.6",
