@@ -49,10 +49,10 @@ describe.skipIf(NODE === undefined)("the built command, on Node", () => {
   test("keeps Items in SQLite through node:sqlite, without warnings", async () => {
     expect(await todo(["add", "From Node", "--section=UI"])).toEqual({
       code: 0,
-      stdout: "Added 1. From Node\n",
+      stdout: "Added `id:1`:\nFrom Node\n",
       stderr: "",
     });
-    expect((await todo(["ls"])).stdout).toBe("# default\n\n## UI\n\n- [ ] 1. From Node\n");
+    expect((await todo(["ls"])).stdout).toBe("# default\n\n## UI\n\n- [ ] From Node `id:1`\n");
   });
 
   test("imports Markdown from stdin", async () => {

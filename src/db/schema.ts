@@ -23,6 +23,8 @@ type ItemsTable = {
   id: string;
   list_id: string;
   number: number;
+  /** The Item's Position in its List: lower comes first. Gaps are allowed. */
+  position: number;
   description: string;
   notes: string | null;
   section: string | null;

@@ -4,7 +4,8 @@ const GUIDE = `# Using todo from an agent
 todo keeps to-do lists in a database. Each **List** has a **List Key** (such
 as \`proj-1\`) and holds **Items**. An Item has a one-line description,
 optional notes, an optional **Section** (a name grouping Items), an optional
-**Priority** (high, medium, low), and a done mark.
+**Priority** (high, medium, low), a done mark, and a **Position** in the
+order the user keeps for the List.
 
 ## Setup
 
@@ -13,6 +14,7 @@ optional notes, an optional **Section** (a name grouping Items), an optional
 | Database     | \`--db\`       | \`TODO_DATABASE_URL\`        | \`~/.todo/todo.db\`  |
 | Default list | \`--list\`     | \`TODO_LIST\`                | \`default\`          |
 | JSON output  | \`--json\`     | \`TODO_FORMAT=json\`         | text               |
+| Color        | \`--no-color\` | \`NO_COLOR=1\`               | on in a terminal   |
 
 A database starting with \`postgres://\` is PostgreSQL; anything else is a
 SQLite file. Set \`TODO_LIST\` and \`TODO_FORMAT=json\` once instead of passing
@@ -36,21 +38,27 @@ deletes. Copying or moving an Item to another List gives it a new ID there.
 ## Commands
 
 - \`todo add <description>\`: add an Item (\`--section\`, \`--priority\`, \`--notes\`).
-- \`todo ls\`: list Items (\`--all\`, \`--section\`, \`--priority\`).
+- \`todo ls\`: list Items (\`--all\`, \`--section\`, \`--priority\`,
+  \`--sort=priority\`, \`--no-ids\`).
 - \`todo show <id>...\`: Item details, with notes.
 - \`todo edit <id> [<description>]\`: change \`--section\`, \`--priority\`,
   \`--notes\`, \`--done\` or \`--not-done\`. \`--section=""\` and \`--notes=""\`
-  clear; \`--priority=none\` clears.
+  clear; \`--priority=none\` clears. \`--move=up|down|top|bottom\` moves the
+  Item within its Section.
 - \`todo done <id>...\`, \`todo done --section=<name>\`, \`todo done --all-items\`.
 - \`todo rm <id>...\`: remove Items.
 - \`todo cp <id>... <list>\` / \`todo mv <id>... <list>\`: copy or move Items.
-- \`todo prompt [<id>...] [--section=<name>]\`: a task brief of pending Items.
+- \`todo prompt [<id>...] [--section=<name>] [--sort=priority]\`: a task brief
+  of pending Items.
 - \`todo list ls\`, \`todo list add <key>\`, \`todo list show <key>\`,
   \`todo list show-summary <key>\`, \`todo list edit <key> --description=...\`,
   \`todo list archive <key>\`, \`todo list unarchive <key>\`,
   \`todo list rm <key> [--force]\`, \`todo list copy <from> <to>\`,
   \`todo list mv <from> <to>\`, \`todo list cleanup <key>\`,
-  \`todo list export <key> > TODO.md\`, \`todo list import <key> < TODO.md\`.
+  \`todo list export <key> [--no-ids] > TODO.md\`,
+  \`todo list import <key> < TODO.md\`.
+- \`todo export [--no-ids]\`, \`todo import\`: the same, on the List from
+  \`--list\` or \`TODO_LIST\`.
 
 Run \`todo <command> --help\` for details.
 
@@ -65,14 +73,19 @@ Run \`todo <command> --help\` for details.
   Priority wins, it stays pending unless both are done, and differing notes are
   appended.
 - \`todo ls\` shows Items without a Section first, then Sections alphabetically
-  (name them \`01 - UI\`, \`02 - API\` to order them); within each, by Priority,
-  then ID.
+  (name them \`01 - UI\`, \`02 - API\` to order them); within each, by
+  Position, or with \`--sort=priority\`, by Priority, then Position. New Items
+  go last; a new Section puts an Item last in it.
+- \`todo ls\` and \`todo list export\` write an Item as
+  \`\` - [ ] Fix login (!high) \`id:3\` \`\`. Importing Markdown of the same List updates
+  the Items whose IDs it names (at the start or the very end of a line) and
+  keeps the rest.
 
 ## JSON output
 
 With \`--json\` or \`TODO_FORMAT=json\`, commands print one JSON value:
 
-- \`todo ls\`, \`todo show\`, \`todo done\`, \`todo cp\`, \`todo mv\`, \`todo list import\`:
+- \`todo ls\`, \`todo show\`, \`todo done\`, \`todo cp\`, \`todo mv\`, \`todo import\`, \`todo list import\`:
   \`{"list": "<key>", "items": [Item, ...]}\`
 - \`todo add\`, \`todo edit\`: \`Item\`
 - \`todo rm\`, \`todo list cleanup\`: \`{"list": "<key>", "removed": [Item, ...]}\`
@@ -85,7 +98,7 @@ An Item is \`{"list", "id", "description", "notes"?, "section"?, "priority"?,
 "description"?, "archived", "createdAt", "updatedAt", "archivedAt"?,
 "pending", "done"}\`. Absent optional fields are left out.
 
-\`todo prompt\`, \`todo list export\`, \`todo guide\` and \`--help\` always print text.
+\`todo prompt\`, \`todo export\`, \`todo list export\`, \`todo guide\` and \`--help\` always print text.
 
 Errors exit non-zero (2 for a bad invocation, 1 otherwise). In JSON mode they
 print \`{"error": {"code": "...", "message": "..."}}\` on stdout. Codes:

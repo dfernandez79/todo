@@ -1,4 +1,4 @@
-import type { Selectable } from "kysely";
+import { type Selectable, sql } from "kysely";
 
 import type { ItemsTable, ListsTable } from "./db/schema.ts";
 import { TodoError } from "./errors.ts";
@@ -104,8 +104,39 @@ const ensureWritableListRow = async (context: StoreContext, key: string): Promis
   return row === undefined ? insertListRow(context, key) : assertNotArchived(row);
 };
 
+/** A List's Item rows by Position. */
 const loadItemRows = ({ db }: StoreContext, listId: string): Promise<ItemRow[]> =>
-  db.selectFrom("todo_items").selectAll().where("list_id", "=", listId).execute();
+  db
+    .selectFrom("todo_items")
+    .selectAll()
+    .where("list_id", "=", listId)
+    .orderBy("position")
+    .orderBy("number")
+    .execute();
+
+const byPosition = (rows: readonly ItemRow[]): ItemRow[] =>
+  rows.toSorted((a, b) => a.position - b.position || a.number - b.number);
+
+/** The Position after every Item of a List: the end of the List. */
+const nextPosition = async ({ db }: StoreContext, list: ListRow): Promise<number> => {
+  const { last } = await db
+    .selectFrom("todo_items")
+    .select(sql<number>`coalesce(max(position), 0)`.as("last"))
+    .where("list_id", "=", list.id)
+    .executeTakeFirstOrThrow();
+  return Number(last) + 1;
+};
+
+/** Changes an Item's Position, which isn't a change to its content, so `updated_at` stays. */
+const setItemPosition = async (
+  { db }: StoreContext,
+  row: ItemRow,
+  position: number,
+): Promise<ItemRow> => {
+  if (row.position === position) return row;
+  await db.updateTable("todo_items").set({ position }).where("id", "=", row.id).execute();
+  return { ...row, position };
+};
 
 /** The rows of the given Item IDs, in the order given, or ITEM_NOT_FOUND naming the missing ones. */
 const getItemRows = async (
@@ -152,6 +183,7 @@ const insertItemRow = async (
   draft: ItemDraft,
 ): Promise<ItemRow> => {
   const number = await allocateItemNumber(context, list);
+  const position = await nextPosition(context, list);
   const at = context.now();
   return context.db
     .insertInto("todo_items")
@@ -159,6 +191,7 @@ const insertItemRow = async (
       id: context.newId(),
       list_id: list.id,
       number,
+      position,
       description: draft.description,
       notes: draft.notes ?? null,
       section: draft.section ?? null,
@@ -196,6 +229,18 @@ const updateItemRow = async (
     .executeTakeFirstOrThrow();
 };
 
+const deleteItemRows = async ({ db }: StoreContext, rows: readonly ItemRow[]): Promise<void> => {
+  if (rows.length === 0) return;
+  await db
+    .deleteFrom("todo_items")
+    .where(
+      "id",
+      "in",
+      rows.map(row => row.id),
+    )
+    .execute();
+};
+
 const loadListRows = ({ db }: StoreContext, options: { archived: boolean }): Promise<ListRow[]> => {
   const query = db.selectFrom("todo_lists").selectAll().orderBy("key");
   return (options.archived ? query : query.where("archived_at", "is", null)).execute();
@@ -229,6 +274,8 @@ export {
   DEFAULT_LIST_KEY,
   type ItemRow,
   type ListRow,
+  byPosition,
+  deleteItemRows,
   ensureWritableListRow,
   findListRow,
   findReadableListRow,
@@ -240,6 +287,8 @@ export {
   listNotFound,
   loadItemRows,
   loadListRows,
+  nextPosition,
+  setItemPosition,
   setListArchivedAt,
   setListDescription,
   toDraft,

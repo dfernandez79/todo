@@ -1,5 +1,5 @@
 import { priorityRank } from "./merge.ts";
-import type { Item } from "./types.ts";
+import type { Item, ItemSort } from "./types.ts";
 
 const collator = new Intl.Collator("en");
 
@@ -11,19 +11,24 @@ const compareSections = (a: string | undefined, b: string | undefined): number =
   return collator.compare(a, b);
 };
 
-/** Display order: by Section, then Priority (High first, none last), then Item ID. */
-const compareItems = (a: Item, b: Item): number =>
-  compareSections(a.section, b.section) ||
-  priorityRank(b.priority) - priorityRank(a.priority) ||
-  a.id - b.id;
+const bySection = (a: Item, b: Item): number => compareSections(a.section, b.section);
 
-const sortItems = (items: readonly Item[]): Item[] => items.toSorted(compareItems);
+const byPriority = (a: Item, b: Item): number =>
+  bySection(a, b) || priorityRank(b.priority) - priorityRank(a.priority);
+
+/**
+ * Display order, from Items given by Position: by Section, then by Position,
+ * or by Priority (High first, none last) and then Position. The sort is
+ * stable, so Position breaks every tie.
+ */
+const sortItems = (items: readonly Item[], sort: ItemSort = "position"): Item[] =>
+  items.toSorted(sort === "priority" ? byPriority : bySection);
 
 type SectionGroup = { section: string | undefined; items: Item[] };
 
-/** Groups Items sorted in display order, keeping that order. */
+/** Groups Items by Section, keeping their order inside each one. */
 const groupBySection = (items: readonly Item[]): SectionGroup[] =>
-  sortItems(items).reduce<SectionGroup[]>((groups, item) => {
+  items.toSorted(bySection).reduce<SectionGroup[]>((groups, item) => {
     const last = groups.at(-1);
     if (last !== undefined && last.section === item.section) last.items.push(item);
     else groups.push({ section: item.section, items: [item] });

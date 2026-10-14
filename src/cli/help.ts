@@ -6,6 +6,9 @@ const OPTION_HELP: Record<OptionName, string> = {
   section: "--section=<name>, -s  The Section",
   priority: "--priority=<p>, -p    The Priority: high, medium, low (none to clear or filter)",
   notes: "--notes=<text>, -n    The Item's longer notes",
+  sort: "--sort=<s>            Order inside each Section: position (default) or priority",
+  move: "--move=<m>            Move the Item within its Section: up, down, top, bottom",
+  "no-ids": "--no-ids              Leave the Item IDs out",
   description: "--description=<text>  The List's description",
   all: "--all, -a             Include Done Items",
   "all-items": "--all-items           Every pending Item of the List",
@@ -14,11 +17,14 @@ const OPTION_HELP: Record<OptionName, string> = {
   archived: "--archived            Include Archived Lists",
   force: "--force, -f           Also remove the List's Items",
   json: "--json                Print JSON (or set TODO_FORMAT=json)",
+  color:
+    "--color               Color the output even when it isn't a terminal (or set FORCE_COLOR=1)",
+  "no-color": "--no-color            Don't color the output (or set NO_COLOR=1)",
   db: "--db=<url|path>       A postgres:// URL or SQLite file (default: $TODO_DATABASE_URL, or ~/.todo/todo.db)",
   help: "--help, -h            Show help",
 };
 
-const GLOBAL_OPTIONS: readonly OptionName[] = ["json", "db", "help"];
+const GLOBAL_OPTIONS: readonly OptionName[] = ["json", "color", "no-color", "db", "help"];
 
 const commandLines = (prefix: string, commands: readonly Command[]): string[] => {
   const names = commands.map(command =>

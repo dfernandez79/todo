@@ -7,6 +7,9 @@ const OPTIONS = {
   section: { type: "string", short: "s" },
   priority: { type: "string", short: "p" },
   notes: { type: "string", short: "n" },
+  sort: { type: "string" },
+  move: { type: "string" },
+  "no-ids": { type: "boolean" },
   description: { type: "string" },
   all: { type: "boolean", short: "a" },
   "all-items": { type: "boolean" },
@@ -15,6 +18,8 @@ const OPTIONS = {
   archived: { type: "boolean" },
   force: { type: "boolean", short: "f" },
   json: { type: "boolean" },
+  color: { type: "boolean" },
+  "no-color": { type: "boolean" },
   db: { type: "string" },
   help: { type: "boolean", short: "h" },
 } as const satisfies ParseArgsOptionsConfig;

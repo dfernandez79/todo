@@ -7,9 +7,14 @@ import { type Command, GROUPS, ITEM_COMMANDS, findCommand, itemsCommand } from "
 import { GUIDE } from "./guide.ts";
 import { GENERAL_HELP, GLOBAL_OPTIONS, commandHelp, groupHelp } from "./help.ts";
 import { type OptionValues, parseArgv } from "./options.ts";
+import { styleFor } from "./style.ts";
 
 /** Where the command writes: `process.stdout` and `process.stderr`, or a test's capture. */
-type Output = { write: (text: string) => unknown };
+type Output = {
+  write: (text: string) => unknown;
+  /** Whether it's a terminal, which gets color by default. */
+  isTTY?: boolean;
+};
 
 type CliIo = {
   stdout: Output;
@@ -92,6 +97,19 @@ const resolveJson = (values: OptionValues, env: CliSystem["env"]): boolean => {
   return values.json === true || format === "json";
 };
 
+/**
+ * Color goes only to text output: `--no-color`, then `--color`, then
+ * `NO_COLOR`, then `FORCE_COLOR` decide, and otherwise whether stdout is a terminal.
+ */
+const resolveColor = (values: OptionValues, env: CliSystem["env"], stdout: Output): boolean => {
+  if (values["no-color"] === true) return false;
+  if (values.color === true) return true;
+  if (nonEmpty(env.NO_COLOR) !== undefined) return false;
+  const force = nonEmpty(env.FORCE_COLOR);
+  if (force !== undefined) return force !== "0";
+  return stdout.isTTY === true;
+};
+
 const errorBody = (error: unknown): { code: string; message: string } => {
   if (error instanceof UsageError) return { code: "USAGE", message: error.message };
   if (error instanceof TodoError) return { code: error.code, message: error.message };
@@ -129,6 +147,7 @@ const runCli = async (argv: readonly string[], io: CliIo, system: CliSystem): Pr
     const result = await command.run({
       args,
       values,
+      style: styleFor(!json && resolveColor(values, system.env, io.stdout)),
       listKey: usesList
         ? parseListKey(values.list ?? nonEmpty(system.env.TODO_LIST) ?? "default")
         : "default",

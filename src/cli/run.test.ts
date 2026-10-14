@@ -42,7 +42,45 @@ describe.each(DATABASES)("todo on $name", database => {
         done: false,
       });
       expect(second.section).toBe("List Testing");
+      expect((await todo(["add", "Third"])).stdout).toBe("Added `id:3`:\nThird\n");
       expect(other.list).toBe("list-2");
+    });
+
+    test("lists Items without their IDs with --no-ids, also as the default command", async () => {
+      await todo(["add", "One"]);
+      expect((await todo([])).stdout).toBe("# default\n\n- [ ] One `id:1`\n");
+      expect((await todo(["--no-ids"])).stdout).toBe("# default\n\n- [ ] One\n");
+      expect((await todo(["ls", "--no-ids"])).stdout).toBe("# default\n\n- [ ] One\n");
+    });
+
+    test("colors text output only when asked, or for a terminal", async () => {
+      await todo(["add", "Fix **login**", "--section=UI"]);
+      await todo(["add", "Old", "--section=UI"]);
+      await todo(["done", "2"]);
+      const colored = (await todo(["ls", "-a", "--color"])).stdout;
+      expect(colored).toBe(
+        [
+          "\u001B[1m# default\u001B[22m",
+          "",
+          "\u001B[1m\u001B[34m## UI\u001B[39m\u001B[22m",
+          "",
+          "- [ ] Fix \u001B[1mlogin\u001B[22m \u001B[90m`id:1`\u001B[39m",
+          "\u001B[90m- [x] Old \u001B[90m`id:2`\u001B[39m\u001B[39m",
+          "",
+        ].join("\n"),
+      );
+      expect((await todo(["ls"])).stdout).not.toContain("\u001B");
+      expect((await todo(["ls", "--color", "--no-color"])).stdout).not.toContain("\u001B");
+      expect((await todo(["ls", "--color", "--json"])).stdout).not.toContain("\u001B");
+      expect((await todo(["export", "--color"])).stdout).not.toContain("\u001B");
+      expect((await todo(["prompt", "--color"])).stdout).not.toContain("\u001B");
+
+      const forced = todoCli(await database.fresh(), { FORCE_COLOR: "1" });
+      expect((await forced(["add", "One"])).stdout).toBe(
+        "Added \u001B[90m`id:1`\u001B[39m:\nOne\n",
+      );
+      const both = todoCli(await database.fresh(), { FORCE_COLOR: "1", NO_COLOR: "1" });
+      expect((await both(["add", "One"])).stdout).toBe("Added `id:1`:\nOne\n");
     });
 
     test("joins unquoted words into one description", async () => {
@@ -62,7 +100,7 @@ describe.each(DATABASES)("todo on $name", database => {
       expect((await todo.json<Item>(["add", "Three"])).id).toBe(3);
     });
 
-    test("lists pending Items by Section, then Priority, then ID", async () => {
+    test("lists pending Items by Section, then Priority with --sort=priority", async () => {
       await todo(["add", "b-none", "--section=B"]);
       await todo(["add", "loose-low", "-p", "low"]);
       await todo(["add", "a-high", "--section=A", "--priority=high"]);
@@ -72,7 +110,7 @@ describe.each(DATABASES)("todo on $name", database => {
       await todo(["add", "done"]);
       await todo(["done", "7"]);
 
-      expect(descriptions(await todo.json<Items>(["items"]))).toEqual([
+      expect(descriptions(await todo.json<Items>(["items", "--sort=priority"]))).toEqual([
         "loose-high",
         "loose-low",
         "loose",
@@ -90,25 +128,99 @@ describe.each(DATABASES)("todo on $name", database => {
         "loose",
         "b-none",
       ]);
-      expect((await todo(["ls"])).stdout).toBe(
+      expect((await todo(["ls", "--sort=priority"])).stdout).toBe(
         [
           "# default",
           "",
-          "- [ ] 5. loose-high (!high)",
-          "- [ ] 2. loose-low (!low)",
-          "- [ ] 4. loose",
+          "- [ ] loose-high (!high) `id:5`",
+          "- [ ] loose-low (!low) `id:2`",
+          "- [ ] loose `id:4`",
           "",
           "## A",
           "",
-          "- [ ] 3. a-high (!high)",
-          "- [ ] 6. a-medium (!medium)",
+          "- [ ] a-high (!high) `id:3`",
+          "- [ ] a-medium (!medium) `id:6`",
           "",
           "## B",
           "",
-          "- [ ] 1. b-none",
+          "- [ ] b-none `id:1`",
           "",
         ].join("\n"),
       );
+    });
+
+    test("lists Items by Section, then Position, by default", async () => {
+      await todo(["add", "b-one", "--section=B"]);
+      await todo(["add", "loose-low", "--priority=low"]);
+      await todo(["add", "loose-high", "--priority=high"]);
+      await todo(["add", "b-two", "--section=B", "--priority=high"]);
+      expect(descriptions(await todo.json<Items>(["ls"]))).toEqual([
+        "loose-low",
+        "loose-high",
+        "b-one",
+        "b-two",
+      ]);
+      expect(await errorOf(todo, ["ls", "--sort=id"])).toMatchObject({ code: "INVALID_INPUT" });
+    });
+
+    test("moves an Item within its Section, stepping over hidden Done Items", async () => {
+      for (const description of ["one", "two", "three", "four"]) await todo(["add", description]);
+      await todo(["add", "other", "--section=S"]);
+      await todo(["done", "2"]);
+      const before = (await todo.json<Items>(["show", "3"])).items[0]!;
+
+      const moved = await todo.json<Item>(["edit", "3", "--move=up"]);
+      expect(moved.updatedAt).toBe(before.updatedAt);
+      expect(descriptions(await todo.json<Items>(["ls"]))).toEqual([
+        "three",
+        "one",
+        "four",
+        "other",
+      ]);
+      expect(descriptions(await todo.json<Items>(["ls", "-a"]))).toEqual([
+        "three",
+        "one",
+        "two",
+        "four",
+        "other",
+      ]);
+
+      await todo(["edit", "3", "--move=up"]);
+      expect(descriptions(await todo.json<Items>(["ls"]))).toEqual([
+        "three",
+        "one",
+        "four",
+        "other",
+      ]);
+      await todo(["edit", "3", "--move=bottom"]);
+      expect(descriptions(await todo.json<Items>(["ls"]))).toEqual([
+        "one",
+        "four",
+        "three",
+        "other",
+      ]);
+      await todo(["edit", "3", "--move=top"]);
+      await todo(["edit", "1", "--move=down"]);
+      expect(descriptions(await todo.json<Items>(["ls"]))).toEqual([
+        "three",
+        "four",
+        "one",
+        "other",
+      ]);
+      expect(await errorOf(todo, ["edit", "1", "--move=left"])).toMatchObject({
+        code: "INVALID_INPUT",
+      });
+    });
+
+    test("a new Section puts an Item last in it, before any move", async () => {
+      await todo(["add", "one", "--section=S"]);
+      await todo(["add", "two", "--section=S"]);
+      await todo(["add", "three"]);
+      await todo(["edit", "3", "--section=S"]);
+      expect(descriptions(await todo.json<Items>(["ls"]))).toEqual(["one", "two", "three"]);
+      await todo(["edit", "1", "--section=", "--move=top"]);
+      await todo(["edit", "3", "--section=", "--move=top"]);
+      expect(descriptions(await todo.json<Items>(["ls"]))).toEqual(["three", "one", "two"]);
     });
 
     test("reading a missing List other than the default fails", async () => {
@@ -376,7 +488,7 @@ describe.each(DATABASES)("todo on $name", database => {
       await todo(["add", "Elsewhere"]);
       expect(await errorOf(todo, ["cp", "1", "test-1"])).toMatchObject({ code: "LIST_ARCHIVED" });
       expect((await todo(["list", "show", "test-1"])).stdout).toBe(
-        "# test-1 (archived)\n\n1 pending, 0 done\n\n- [ ] 1. One\n",
+        "# test-1 (archived)\n\n1 pending, 0 done\n\n- [ ] One `id:1`\n",
       );
       await todo(["list", "unarchive", "test-1"]);
       expect(descriptions(await todo.json<Items>(["ls", "--list=test-1"]))).toEqual(["One"]);
@@ -440,7 +552,10 @@ describe.each(DATABASES)("todo on $name", database => {
       await todo(["add", "One", "--list=test-1", "--priority=high", "--notes=Some notes"]);
       await todo(["add", "Two", "--list=test-1", "--section=01 - UI"]);
       await todo(["done", "2", "--list=test-1"]);
-      const markdown = (await todo(["list", "export", "test-1", "--json"])).stdout;
+      expect((await todo(["list", "export", "test-1"])).stdout).toBe(
+        "# test-1\n\nThe list.\n\n- [ ] One (!high) `id:1`\n  Some notes\n\n## 01 - UI\n\n- [x] Two `id:2`\n",
+      );
+      const markdown = (await todo(["list", "export", "test-1", "--no-ids", "--json"])).stdout;
       expect(markdown).toBe(
         "# test-1\n\nThe list.\n\n- [ ] One (!high)\n  Some notes\n\n## 01 - UI\n\n- [x] Two\n",
       );
@@ -462,6 +577,87 @@ describe.each(DATABASES)("todo on $name", database => {
       expect((await todo.json<Items>(["show", "1", "--list=test-2"])).items[0]!.notes).toBe(
         "Some notes",
       );
+    });
+
+    test("import updates the Items whose IDs it names, keeping their Positions", async () => {
+      for (const description of ["One", "Two", "Three", "Four", "Five"]) {
+        await todo(["add", description, "--list=test-1"]);
+      }
+      await todo(["edit", "2", "--notes=Old notes", "--list=test-1"]);
+      const imported = await todo.json<Items>(
+        ["list", "import", "test-1"],
+        "# test-1\n\n- [x] `id:4` Four done (!high)\n- [ ] Two again (!low) `id:2`\n- [ ] Six `id:99`\n",
+      );
+      expect(imported.items.map(item => [item.id, item.description, item.done])).toEqual([
+        [4, "Four done", true],
+        [2, "Two again", false],
+        [6, "Six", false],
+      ]);
+      const listed = await todo.json<Items>(["ls", "-a", "--list=test-1"]);
+      expect(listed.items.map(item => [item.id, item.description])).toEqual([
+        [1, "One"],
+        [4, "Four done"],
+        [3, "Three"],
+        [2, "Two again"],
+        [5, "Five"],
+        [6, "Six"],
+      ]);
+      expect(listed.items[3]).toMatchObject({ priority: "low" });
+      expect(listed.items[3]!.notes).toBeUndefined();
+    });
+
+    test("import merges the Duplicate Items an update makes", async () => {
+      await todo(["add", "Same", "--list=test-1", "--priority=low"]);
+      await todo(["add", "Other", "--list=test-1"]);
+      const imported = await todo.json<Items>(
+        ["list", "import", "test-1"],
+        "- [ ] Same (!high) `id:2`\n",
+      );
+      expect(ids(imported)).toEqual([1]);
+      expect((await todo.json<Items>(["ls", "--list=test-1"])).items).toMatchObject([
+        { id: 1, description: "Same", priority: "high" },
+      ]);
+    });
+
+    test("export and import work on the List from --list or TODO_LIST", async () => {
+      const env = todoCli(await database.fresh(), { TODO_LIST: "proj-1" });
+      await env(["add", "One"]);
+      const markdown = (await env(["export"])).stdout;
+      expect(markdown).toBe((await env(["list", "export", "proj-1"])).stdout);
+      expect(markdown).toBe("# proj-1\n\n- [ ] One `id:1`\n");
+      expect((await env(["export", "--no-ids"])).stdout).toBe("# proj-1\n\n- [ ] One\n");
+
+      await env(["import", "--list=proj-2"], "- [ ] Two\n");
+      await env(["import"], "- [ ] One again `id:1`\n");
+      expect(descriptions(await env.json<Items>(["ls"]))).toEqual(["One again"]);
+      expect(descriptions(await env.json<Items>(["ls", "--list=proj-2"]))).toEqual(["Two"]);
+      expect((await env(["export", "proj-2"])).code).toBe(2);
+    });
+
+    test("import ignores the IDs of another List's Markdown", async () => {
+      await todo(["add", "Mine", "--list=test-2"]);
+      await todo(["add", "Theirs", "--list=test-1"]);
+      const markdown = (await todo(["list", "export", "test-1"])).stdout;
+      expect(markdown).toBe("# test-1\n\n- [ ] Theirs `id:1`\n");
+      await todo(["list", "import", "test-2"], markdown);
+      expect(descriptions(await todo.json<Items>(["ls", "--list=test-2"]))).toEqual([
+        "Mine",
+        "Theirs",
+      ]);
+    });
+
+    test("copies Items last in the target, in their source order", async () => {
+      await todo(["add", "Existing", "--list=test-2"]);
+      for (const description of ["One", "Two", "Three"]) {
+        await todo(["add", description, "--list=test-1"]);
+      }
+      await todo(["edit", "3", "--move=top", "--list=test-1"]);
+      await todo(["cp", "1", "3", "test-2", "--list=test-1"]);
+      expect(descriptions(await todo.json<Items>(["ls", "--list=test-2"]))).toEqual([
+        "Existing",
+        "Three",
+        "One",
+      ]);
     });
 
     test("import keeps a List's description and reports bad Markdown", async () => {

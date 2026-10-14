@@ -5,12 +5,16 @@ import { renderPrompt } from "./prompt.ts";
 import {
   type ItemRow,
   type ListRow,
+  byPosition,
+  deleteItemRows,
   ensureWritableListRow,
   findReadableListRow,
   getActiveListRow,
   getItemRows,
   insertItemRow,
   loadItemRows,
+  nextPosition,
+  setItemPosition,
   toDraft,
   toItem,
   updateItemRow,
@@ -19,6 +23,8 @@ import { type StoreContext, type TodoStore, inTransaction } from "./store.ts";
 import {
   type Item,
   type ItemDraft,
+  type ItemMove,
+  type ItemSort,
   type Priority,
   parseDescription,
   parseListKey,
@@ -40,6 +46,8 @@ type ItemFilter = {
   section?: string;
   /** Only the Items with this Priority; `"none"` means Items with no Priority. */
   priority?: Priority | "none";
+  /** How to order the Items inside each Section; by default, by Position. */
+  sort?: ItemSort;
 };
 
 /** Changes to an Item. `""` clears the Section or Notes, and `"none"` the Priority. */
@@ -49,6 +57,8 @@ type ItemChanges = {
   priority?: Priority | "none";
   notes?: string;
   done?: boolean;
+  /** Moves the Item within its Section, after the other changes. */
+  move?: ItemMove;
 };
 
 const blankToUndefined = (text: string): string | undefined =>
@@ -75,8 +85,12 @@ const matches = (item: Item, filter: ItemFilter): boolean =>
   (filter.section === undefined || (item.section ?? "") === filter.section.trim()) &&
   (filter.priority === undefined || (item.priority ?? "none") === filter.priority);
 
+/** Keeps the Items, given by Position, that match, sorted into display order. */
 const filterItems = (items: readonly Item[], filter: ItemFilter): Item[] =>
-  sortItems(items.filter(item => matches(item, filter)));
+  sortItems(
+    items.filter(item => matches(item, filter)),
+    filter.sort,
+  );
 
 /** The Items of a List in display order, by default only the pending ones. */
 const listItems = async (list: TodoList, filter: ItemFilter = {}): Promise<Item[]> => {
@@ -108,11 +122,51 @@ const applyChanges = (draft: ItemDraft, changes: ItemChanges, now: string): Item
   return next;
 };
 
+const moveTarget = (move: ItemMove, from: number, last: number): number => {
+  if (move === "up") return Math.max(from - 1, 0);
+  if (move === "down") return Math.min(from + 1, last);
+  return move === "top" ? 0 : last;
+};
+
+/**
+ * Moves an Item within its Section. A pending Item steps over Done Items,
+ * which `todo ls` hides, so every move shows. Renumbers the List's Positions.
+ */
+const moveRow = async (
+  tx: StoreContext,
+  list: ListRow,
+  row: ItemRow,
+  move: ItemMove,
+): Promise<ItemRow> => {
+  const rows = await loadItemRows(tx, list.id);
+  const pending = row.done_at === null;
+  const siblings = rows.filter(
+    other =>
+      other.section === row.section && (other.id === row.id || !pending || other.done_at === null),
+  );
+  const from = siblings.findIndex(other => other.id === row.id);
+  const to = moveTarget(move, from, siblings.length - 1);
+  if (to === from) return row;
+  const others = rows.filter(other => other.id !== row.id);
+  const at = others.indexOf(siblings[to]!) + (to > from ? 1 : 0);
+  let moved = row;
+  for (const [index, item] of others.toSpliced(at, 0, row).entries()) {
+    const updated = await setItemPosition(tx, item, index + 1);
+    if (item.id === row.id) moved = updated;
+  }
+  return moved;
+};
+
+/** Changes an Item. A new Section puts it last; a move doesn't change its `updatedAt`. */
 const editItem = (list: TodoList, id: number, changes: ItemChanges): Promise<Item> =>
   inTransaction(list.store, async tx => {
     const row = await getActiveListRow(tx, list.key);
     const [item] = await getItemRows(tx, row, [id]);
-    const updated = await updateItemRow(tx, item!, applyChanges(toDraft(item!), changes, tx.now()));
+    let updated = await updateItemRow(tx, item!, applyChanges(toDraft(item!), changes, tx.now()));
+    if (updated.section !== item!.section) {
+      updated = await setItemPosition(tx, updated, await nextPosition(tx, row));
+    }
+    if (changes.move !== undefined) updated = await moveRow(tx, row, updated, changes.move);
     return toItem(updated, row.key);
   });
 
@@ -144,24 +198,12 @@ const markAllDone = (list: TodoList, options: { section?: string } = {}): Promis
     return sortItems(await markRowsDone(tx, row, pending));
   });
 
-const deleteRows = async ({ db }: StoreContext, rows: readonly ItemRow[]) => {
-  if (rows.length === 0) return;
-  await db
-    .deleteFrom("todo_items")
-    .where(
-      "id",
-      "in",
-      rows.map(row => row.id),
-    )
-    .execute();
-};
-
 /** Removes Items, returning them as they were. */
 const removeItems = (list: TodoList, ids: readonly number[]): Promise<Item[]> =>
   inTransaction(list.store, async tx => {
     const row = await getActiveListRow(tx, list.key);
     const rows = await getItemRows(tx, row, ids);
-    await deleteRows(tx, rows);
+    await deleteItemRows(tx, rows);
     return rows.map(item => toItem(item, row.key));
   });
 
@@ -203,10 +245,10 @@ const transferItems = (list: TodoList, ids: readonly number[], targetKey: string
     const target = parseListKey(targetKey);
     assertDifferentLists(list.key, target);
     const source = await getActiveListRow(tx, list.key);
-    const rows = await getItemRows(tx, source, ids);
+    const rows = byPosition(await getItemRows(tx, source, ids));
     const targetRow = await ensureWritableListRow(tx, target);
     const merged = await mergeIntoList(tx, targetRow, rows.map(toDraft));
-    if (move) await deleteRows(tx, rows);
+    if (move) await deleteItemRows(tx, rows);
     return merged.map(item => toItem(item, targetRow.key));
   });
 
@@ -218,7 +260,7 @@ const copyItems = (list: TodoList, ids: readonly number[], targetKey: string): P
 const moveItems = (list: TodoList, ids: readonly number[], targetKey: string): Promise<Item[]> =>
   transferItems(list, ids, targetKey, true);
 
-type PromptSelection = { ids?: readonly number[]; section?: string };
+type PromptSelection = { ids?: readonly number[]; section?: string; sort?: ItemSort };
 
 /** A Prompt for the selected pending Items; with no selection, all of them. */
 const buildPrompt = async (list: TodoList, selection: PromptSelection = {}): Promise<string> => {
@@ -231,11 +273,11 @@ const buildPrompt = async (list: TodoList, selection: PromptSelection = {}): Pro
     row === undefined
       ? []
       : ids.length > 0
-        ? await getItemRows(list.store, row, ids)
+        ? byPosition(await getItemRows(list.store, row, ids))
         : await loadItemRows(list.store, row.id);
   const items = filterItems(
     rows.map(item => toItem(item, list.key)),
-    { section: selection.section },
+    { section: selection.section, sort: selection.sort },
   );
   return renderPrompt(list.key, row?.description ?? undefined, items);
 };

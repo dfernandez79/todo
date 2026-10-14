@@ -39,10 +39,14 @@ todo ls --all              # include done Items
 todo show 3                # an Item's details, with its notes
 todo done 3 5              # mark Items done
 todo edit 3 --priority=low --section=Backlog
+todo edit 3 --move=up      # move an Item up within its Section
+todo ls --sort=priority    # sort by Priority instead of Position
 todo prompt --section='01 - UI'   # a task brief for an agent
 todo cp 3 5 proj-2         # copy Items to another List
 todo list export proj-1 > TODO.md
 todo list import proj-1 < TODO.md
+todo export > TODO.md      # same as list export, on the default List
+todo import < TODO.md      # same as list import, on the default List
 todo guide                 # the usage guide for agents
 todo --help
 ```
@@ -54,26 +58,33 @@ Reading a list fails, except for `default`, which reads as empty.
 Items are identified by their ID (`3` or `#3`). Each ID is a number unique
 within the List. It never changes or gets reused, even after you delete an item.
 
+Each Item also has a Position: its place in the order you keep for the List.
+`todo ls` shows Items by Section, then by Position. New Items go last, and
+`todo edit <id> --move=up|down|top|bottom` moves an Item within its Section.
+
 ## Commands
 
 ### Items
 
-| Command               | Alias    | Does                                                                                |
-| --------------------- | -------- | ----------------------------------------------------------------------------------- |
-| `add <description>`   | `a`      | Add an Item. Takes `--section`, `--priority`, `--notes`.                            |
-| `items`               | `ls`     | List pending Items. The default command. Takes `--all`, `--section`, `--priority`.  |
-| `show <id>...`        |          | Show Items with their notes.                                                        |
-| `edit <id> [<desc>]`  | `e`      | Change an Item. Takes `--section`, `--priority`, `--notes`, `--done`, `--not-done`. |
-| `done <id>...`        | `d`, `x` | Mark Items done. `--section=<name>` or `--all-items` mark many.                     |
-| `remove <id>...`      | `rm`     | Remove Items.                                                                       |
-| `copy <id>... <list>` | `cp`     | Copy Items to another List. Copies get new IDs.                                     |
-| `move <id>... <list>` | `mv`     | Copy, then remove the source Items.                                                 |
-| `prompt [<id>...]`    |          | Print a task brief of the pending Items. Takes `--section`.                         |
-| `guide`               |          | Print the usage guide for agents.                                                   |
+| Command               | Alias    | Does                                                                                                     |
+| --------------------- | -------- | -------------------------------------------------------------------------------------------------------- |
+| `add <description>`   | `a`      | Add an Item. Takes `--section`, `--priority`, `--notes`.                                                 |
+| `items`               | `ls`     | List pending Items. The default command. Takes `--all`, `--section`, `--priority`, `--sort`, `--no-ids`. |
+| `show <id>...`        |          | Show Items with their notes.                                                                             |
+| `edit <id> [<desc>]`  | `e`      | Change an Item. Takes `--section`, `--priority`, `--notes`, `--done`, `--not-done`, `--move`.            |
+| `done <id>...`        | `d`, `x` | Mark Items done. `--section=<name>` or `--all-items` mark many.                                          |
+| `remove <id>...`      | `rm`     | Remove Items.                                                                                            |
+| `copy <id>... <list>` | `cp`     | Copy Items to another List. Copies get new IDs.                                                          |
+| `move <id>... <list>` | `mv`     | Copy, then remove the source Items.                                                                      |
+| `prompt [<id>...]`    |          | Print a task brief of the pending Items. Takes `--section`, `--sort`.                                    |
+| `export`              |          | `list export` on the List from `--list`, `$TODO_LIST`, or `default`. Takes `--no-ids`.                   |
+| `import`              |          | `list import` on that List.                                                                              |
+| `guide`               |          | Print the usage guide for agents.                                                                        |
 
 In `edit`, `--section=""` and `--notes=""` clear the field, and
 `--priority=none` clears the Priority. `--done=true` and `--done=false` also
-work.
+work. A new Section puts the Item last in it. `--move` steps a pending Item over
+Done Items, which `todo ls` hides, and doesn't change the Item's `updatedAt`.
 
 ### Lists
 
@@ -90,7 +101,7 @@ work.
 | `list copy <from> <to>`   | Copy a List's Items on top of another List.                                  |
 | `list mv <from> <to>`     | Rename a List if `<to>` doesn't exist; otherwise copy onto it and remove it. |
 | `list cleanup <key>`      | Merge the List's Duplicate Items.                                            |
-| `list export <key>`       | Print the List as a Markdown task list.                                      |
+| `list export <key>`       | Print the List as a Markdown task list. `--no-ids` leaves the Item IDs out.  |
 | `list import <key>`       | Merge a Markdown task list from stdin into the List.                         |
 | `db migrate`              | Run database migrations. Needed only with `TODO_NO_AUTO_MIGRATE=1`.          |
 
@@ -108,12 +119,13 @@ way:
 
 ## Configuration
 
-| Setting      | Flag     | Environment variable     | Default           |
-| ------------ | -------- | ------------------------ | ----------------- |
-| Database     | `--db`   | `TODO_DATABASE_URL`      | `~/.todo/todo.db` |
-| Default list | `--list` | `TODO_LIST`              | `default`         |
-| JSON output  | `--json` | `TODO_FORMAT=json`       | text              |
-| Migrations   |          | `TODO_NO_AUTO_MIGRATE=1` | run on start      |
+| Setting      | Flag                    | Environment variable          | Default           |
+| ------------ | ----------------------- | ----------------------------- | ----------------- |
+| Database     | `--db`                  | `TODO_DATABASE_URL`           | `~/.todo/todo.db` |
+| Default list | `--list`                | `TODO_LIST`                   | `default`         |
+| JSON output  | `--json`                | `TODO_FORMAT=json`            | text              |
+| Color        | `--color`, `--no-color` | `FORCE_COLOR=1`, `NO_COLOR=1` | on in a terminal  |
+| Migrations   |                         | `TODO_NO_AUTO_MIGRATE=1`      | run on start      |
 
 A database value starting with `postgres://` or `postgresql://` indicates
 PostgreSQL; anything else is a SQLite file path. On PostgreSQL, the tables are
@@ -128,27 +140,43 @@ Text is the default. With `--json` or `TODO_FORMAT=json`, each command prints
 one JSON value: `todo ls` prints `{"list": "<key>", "items": [...]}`, `todo add`
 prints the new Item, and so on. `todo guide` lists every shape.
 
-`todo prompt`, `todo list export`, `todo guide` and `--help` always print text.
+`todo prompt`, `todo export`, `todo list export`, `todo guide` and `--help`
+always print text.
+
+In a terminal, text output is in color: IDs and Done Items are dark gray,
+Section headings stand out, and Markdown in descriptions shows as bold, italic,
+or code. `--no-color` or `NO_COLOR=1` turns it off; `--color` or `FORCE_COLOR=1`
+turns it on when the output isn't a terminal. JSON, the prompt and exports are
+never in color.
 
 ## Markdown
 
 `list export` writes, and `list import` reads, GitHub-flavored task lists:
 
+<!-- prettier-ignore -->
 ```markdown
 # proj-1
 
 Optional List description.
 
-- [ ] Item without a Section (!high) Notes are indented under the Item.
+- [ ] Item without a Section (!high) `id:1`
+  Notes are indented under the Item.
 
 ## 01 - UI
 
-- [ ] Pending Item (!low)
-- [x] Done Item
+- [ ] Pending Item (!low) `id:2`
+- [x] Done Item `id:3`
 ```
 
-The file has no Item IDs. Importing merges into the List and never removes
-Items. The file's description is used only if the List has none.
+Items are in Position order. Each line ends with the Item ID, written
+`` `id:3` ``; `list export --no-ids` leaves it out. `todo ls` prints the same
+lines.
+
+Importing never removes Items. The file's description is used only if the List
+has none. When the file's `# <key>` is the List's, or it has none, a line's ID
+(at its start, or as its very last token) updates that Item, which keeps its
+Position among the updated Items in the file's order. Other lines merge into the
+List as Duplicate Items do, and new Items go last.
 
 ## Exit codes
 

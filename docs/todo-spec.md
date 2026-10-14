@@ -44,7 +44,9 @@ in [docs/adr](./adr).
   - Optionally, it can have a priority: High, Medium, Low.
   - Has an Item ID: an integer counter per List, starting at 1. It's never
     reused within the List, even after deletes, and doesn't depend on the Item's
-    contents or position.
+    contents or Position.
+  - Has a Position: its place in the order the user keeps for the List. The
+    Position is independent of the Item ID and the Priority.
   - Stores created, updated, and done-at timestamps.
 - **Duplicate Item:** an Item whose `description` and Section exactly match
   (case-sensitive) another Item in the same List.
@@ -67,12 +69,13 @@ in [docs/adr](./adr).
 
 ## Configuration
 
-| Setting       | Flag     | Environment variable                 | Default           |
-| ------------- | -------- | ------------------------------------ | ----------------- |
-| Database      | `--db`   | `TODO_DATABASE_URL`                  | `~/.todo/todo.db` |
-| Default list  | `--list` | `TODO_LIST`                          | `default`         |
-| Output format | `--json` | `TODO_FORMAT=json`                   | text              |
-| Auto-migrate  |          | `TODO_NO_AUTO_MIGRATE=1` disables it | enabled           |
+| Setting       | Flag                    | Environment variable                 | Default           |
+| ------------- | ----------------------- | ------------------------------------ | ----------------- |
+| Database      | `--db`                  | `TODO_DATABASE_URL`                  | `~/.todo/todo.db` |
+| Default list  | `--list`                | `TODO_LIST`                          | `default`         |
+| Output format | `--json`                | `TODO_FORMAT=json`                   | text              |
+| Color         | `--color`, `--no-color` | `FORCE_COLOR=1`, `NO_COLOR=1`        | on in a terminal  |
+| Auto-migrate  |                         | `TODO_NO_AUTO_MIGRATE=1` disables it | enabled           |
 
 - A flag wins over the environment variable, which wins over the default.
 - A database value starting with `postgres://` (or `postgresql://`) selects
@@ -84,14 +87,40 @@ in [docs/adr](./adr).
 - Text output is the default. `--json` or `TODO_FORMAT=json` switches every
   command to JSON.
 - JSON output includes the Item timestamps; text output hides them.
+- Text output is in color when stdout is a terminal. `--no-color` turns color
+  off, then `--color` turns it on, then `NO_COLOR` turns it off, then
+  `FORCE_COLOR` (anything but `0`) turns it on.
+  - Item IDs and Done Items are dark gray, and Section headings are bold blue.
+  - Item descriptions show their inline Markdown: `**bold**`, `*italic*`, and
+    `` `code` ``.
+  - JSON, `todo prompt`, `todo export`, `todo list export`, `todo guide`, and
+    `--help` are never in color.
 - Errors exit with a non-zero code. In JSON mode they print
   `{"error": {"code": "...", "message": "..."}}`.
 
 ## Display order
 
 1. Items without a Section come first, then Sections in alphabetical order.
-2. Inside each group, Items sort by priority (High, Medium, Low, then no
-   priority), then by Item ID.
+2. Inside each group, Items sort by Position. With `--sort=priority`, they sort
+   by priority (High, Medium, Low, then no priority), then by Position.
+
+`todo ls`, `todo list show`, and `todo prompt` take `--sort=position` (the
+default) or `--sort=priority`. `todo list export` always uses Position order.
+
+## Position
+
+- `add` puts a new Item last in its List.
+- Changing an Item's Section puts it last in the new Section.
+- `cp`, `mv`, `list copy`, and `list mv` onto an existing List put the copies
+  last in the target, in their source order. A merged Duplicate Item keeps the
+  Position of the Item already there.
+- `todo edit <id> --move=up|down|top|bottom` moves an Item within its Section. A
+  pending Item steps over Done Items, which `todo ls` hides, so every move
+  shows. Moving the first Item up, or the last one down, changes nothing.
+- A move changes no Item's `updatedAt`, because it changes no Item's content.
+- Upgrading the database gives existing Items Positions in the display order
+  from before Positions existed (Section, priority, then Item ID), so Lists look
+  the same.
 
 ## Merge rule
 
@@ -124,9 +153,9 @@ All the Item commands have an optional `--list` argument that indicates the List
 to work on. If the List is not specified, the CLI uses `TODO_LIST` to determine
 the default List, or uses the key `default`.
 
-Write commands (`add`, `cp`, `mv`, `list import`, `list copy`, `list mv`) create
-the target List if it doesn't exist. Read commands on a missing List fail,
-except for the `default` List, which reads as empty.
+Write commands (`add`, `cp`, `mv`, `import`, `list import`, `list copy`,
+`list mv`) create the target List if it doesn't exist. Read commands on a
+missing List fail, except for the `default` List, which reads as empty.
 
 ## Item Commands
 
@@ -134,13 +163,17 @@ except for the `default` List, which reads as empty.
 - `remove` (alias `rm`)
 - `done` (alias `d`, `x`); accepts Item IDs, `--section`, or `--all-items`
 - `edit` (alias `e`); accepts `--section`, `--priority`, `--notes`, `--done`,
-  and `--not-done`
-- `items` (alias `ls`; also used when no command is given)
+  `--not-done`, and `--move`
+- `items` (alias `ls`; also used when no command is given); accepts `--all`,
+  `--section`, `--priority`, `--sort`, and `--no-ids`
 - `show` (show the details of one or more Items)
 - `copy` (alias `cp`; copies Items to another List, which gives them new Item
   IDs)
 - `move` (alias `mv`; same as `cp` but removes the source Items afterwards)
 - `prompt` (prints a Prompt for the selected Items)
+- `export` (same as `todo list export <key>` on the List from `--list`,
+  `TODO_LIST`, or `default`); accepts `--no-ids`
+- `import` (same as `todo list import <key>` on that List)
 
 In `cp` and `mv`, the last argument is the target List Key. Because List Keys
 start with a letter, it can't be confused with an Item ID.
@@ -176,6 +209,8 @@ todo --section="List Testing"
 todo --section="List Testing" --all
 # Show the high-priority items in the list
 todo ls --priority=high
+# Sort the items by priority instead of by position
+todo ls --sort=priority
 # Output as JSON
 todo ls --json
 
@@ -187,6 +222,10 @@ todo edit 123 --priority=high
 todo edit 123 "Description new" --priority=low --section="Testing"
 # Change the notes
 todo edit 123 --notes="More details"
+# Move an item up one place in its section
+todo edit 123 --move=up
+# Move an item to the end of its section
+todo edit 123 --move=bottom
 
 # Mark an item as done
 todo done 123
@@ -225,6 +264,10 @@ todo prompt
 todo prompt 3 7
 # Print a prompt for the pending items of a section
 todo prompt --section="01 - UI"
+
+# Export the default list to Markdown, and import it back
+todo export > TODO.md
+todo import < TODO.md
 
 # Print the usage guide for agents
 todo guide
@@ -300,6 +343,8 @@ todo list cleanup test-1
 
 # Export the list to Markdown
 todo list export test-1 > TODO.md
+# Export the list to Markdown without Item IDs
+todo list export test-1 --no-ids > TODO.md
 
 # Import the list from Markdown
 todo list import test-1 < TODO.md
@@ -337,17 +382,19 @@ same as calling `todo cp ...` with all the Items in the List.
 `todo list export` writes, and `todo list import` reads, GitHub-flavored
 Markdown task lists:
 
+<!-- prettier-ignore -->
 ```markdown
 # list-1
 
 Optional list description.
 
-- [ ] Item without a section (!high) Notes are indented under the item.
+- [ ] Item without a section (!high) `id:1`
+  Notes are indented under the item.
 
 ## 01 - UI
 
-- [ ] Pending item (!low)
-- [x] Done item
+- [ ] Pending item (!low) `id:2`
+- [x] Done item `id:3`
 ```
 
 - `# <key>` is followed by the optional List description.
@@ -355,10 +402,30 @@ Optional list description.
 - Items are `- [ ]` (pending) or `- [x]` (done), with an optional trailing
   `(!high)`, `(!medium)`, or `(!low)` priority marker.
 - Notes are indented text under the Item.
-- The file has no Item IDs.
+- Items are in Position order.
+- An Item's ID is written `` `id:3` ``. Export writes it as the very last token
+  of the line, after the priority marker; `--no-ids` leaves it out. Import also
+  reads it at the start of the line: ``- [ ] `id:2` Pending item (!low)``. An ID
+  at both ends of a line, or the same ID on two lines, is invalid input.
+- `todo ls` prints Items in the same line format, with their IDs.
 
-Importing into a List that already has Items merges them using the
-[merge rule](#merge-rule). Import never deletes Items.
+Import never deletes Items: Items the file leaves out stay as they are.
+
+The Item IDs in the file apply when its `# <key>` is the target List's, or when
+it has no `# <key>`. Otherwise the import ignores them, because IDs are unique
+only within their List. When they apply:
+
+- A line whose ID is an Item of the List updates that Item: its description,
+  done mark, priority, notes, and Section. A line without notes clears them.
+- The updated Items swap into the Positions they already held, in the file's
+  order. For example, with Items 1–5 and a file listing `id:4` then `id:2`, Item
+  4 takes Item 2's Position and Item 2 takes Item 4's; Items 1, 3, and 5 stay.
+- If an update makes Duplicate Items, they merge using the
+  [merge rule](#merge-rule).
+- A line with an unknown ID adds a new Item, ignoring the ID.
+
+Lines without an applicable ID merge into the List using the
+[merge rule](#merge-rule), and new Items go last, in the file's order.
 
 ## TypeScript API
 

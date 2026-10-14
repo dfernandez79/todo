@@ -24,8 +24,11 @@ group, sub-section
 **Item**: One thing to do inside a List. _Avoid_: Todo, task, entry
 
 **Item ID**: A number that identifies an Item within its List. It is never
-reused in that List, and it does not depend on the Item's text or position.
-_Avoid_: Index, position
+reused in that List, and it does not depend on the Item's text or Position.
+_Avoid_: Index
+
+**Position**: An Item's place in the order the user keeps for its List,
+independent of its Item ID and Priority. _Avoid_: Order, rank, index
 
 **Description**: The short text of an Item. _Avoid_: Title, name, text
 

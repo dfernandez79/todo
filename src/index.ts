@@ -33,4 +33,14 @@ export {
   unarchiveList,
 } from "./lists.ts";
 export { type StoreOptions, type TodoStore, migrateStore, todoListStore } from "./store.ts";
-export { type Item, type List, type ListSummary, PRIORITIES, type Priority } from "./types.ts";
+export {
+  ITEM_MOVES,
+  ITEM_SORTS,
+  type Item,
+  type ItemMove,
+  type ItemSort,
+  type List,
+  type ListSummary,
+  PRIORITIES,
+  type Priority,
+} from "./types.ts";

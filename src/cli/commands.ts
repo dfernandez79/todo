@@ -30,9 +30,10 @@ import {
   unarchiveList,
 } from "../lists.ts";
 import { type TodoStore, migrateStore } from "../store.ts";
-import { type Priority, parsePriority } from "../types.ts";
+import { type Priority, parseItemMove, parseItemSort, parsePriority } from "../types.ts";
 import type { OptionName, OptionValues } from "./options.ts";
 import {
+  renderAdded,
   renderItems,
   renderItemsChanged,
   renderItemsDetails,
@@ -40,11 +41,14 @@ import {
   renderLists,
   renderSummary,
 } from "./render.ts";
+import type { Style } from "./style.ts";
 
 type CommandContext = {
   /** The positional arguments after the command's name. */
   args: string[];
   values: OptionValues;
+  /** How text output looks; plain unless it goes to a terminal that takes color. */
+  style: Style;
   /** The List Key from `--list`, `TODO_LIST`, or the default. */
   listKey: string;
   openStore: () => Promise<TodoStore>;
@@ -108,6 +112,7 @@ const itemFilter = (values: OptionValues): ItemFilter => ({
   all: values.all,
   section: values.section,
   priority: priorityFilter(values.priority),
+  sort: values.sort === undefined ? undefined : parseItemSort(values.sort),
 });
 
 const withStore = async <T>(context: CommandContext, work: (store: TodoStore) => Promise<T>) =>
@@ -116,14 +121,19 @@ const withStore = async <T>(context: CommandContext, work: (store: TodoStore) =>
 const itemsCommand: Command = {
   name: "items",
   aliases: ["ls"],
-  usage: "[--all] [--section=<name>] [--priority=<high|medium|low|none>]",
+  usage:
+    "[--all] [--section=<name>] [--priority=<high|medium|low|none>] [--sort=<position|priority>] [--no-ids]",
   summary: "List the pending Items, or all of them with --all. The default command.",
-  options: ["list", "all", "section", "priority"],
+  options: ["list", "all", "section", "priority", "sort", "no-ids"],
   run: context =>
     withStore(context, async store => {
       noArgs(context.args);
       const items = await listItems(todoList(store, context.listKey), itemFilter(context.values));
-      return { text: renderItems(context.listKey, items), json: { list: context.listKey, items } };
+      const text = renderItems(context.listKey, items, [], {
+        ids: context.values["no-ids"] !== true,
+        style: context.style,
+      });
+      return { text, json: { list: context.listKey, items } };
     }),
 };
 
@@ -143,7 +153,7 @@ const ITEM_COMMANDS: readonly Command[] = [
           priority: priority === undefined ? undefined : parsePriority(priority),
           notes,
         });
-        return { text: `Added ${item.id}. ${item.description}\n`, json: item };
+        return { text: renderAdded(item, context.style), json: item };
       }),
   },
   {
@@ -159,7 +169,7 @@ const ITEM_COMMANDS: readonly Command[] = [
           parseItemIds(context.args),
         );
         return {
-          text: renderItemsChanged("Removed:", removed),
+          text: renderItemsChanged("Removed:", removed, context.style),
           json: { list: context.listKey, removed },
         };
       }),
@@ -184,7 +194,7 @@ const ITEM_COMMANDS: readonly Command[] = [
             ? await markDone(list, parseItemIds(context.args))
             : await markAllDone(list, { section });
         return {
-          text: renderItemsChanged("Marked done:", items),
+          text: renderItemsChanged("Marked done:", items, context.style),
           json: { list: context.listKey, items },
         };
       }),
@@ -193,9 +203,10 @@ const ITEM_COMMANDS: readonly Command[] = [
     name: "edit",
     aliases: ["e"],
     usage:
-      "<id> [<description>] [--section=<name>] [--priority=<high|medium|low|none>] [--notes=<text>] [--done | --not-done]",
-    summary: 'Change an Item. --section="" and --notes="" clear them; --priority=none clears it.',
-    options: ["list", "section", "priority", "notes", "done", "not-done"],
+      "<id> [<description>] [--section=<name>] [--priority=<high|medium|low|none>] [--notes=<text>] [--done | --not-done] [--move=<up|down|top|bottom>]",
+    summary:
+      'Change an Item. --section="" and --notes="" clear them; --priority=none clears it. --move moves it within its Section.',
+    options: ["list", "section", "priority", "notes", "done", "not-done", "move"],
     run: context =>
       withStore(context, async store => {
         const [id, ...words] = context.args;
@@ -210,12 +221,13 @@ const ITEM_COMMANDS: readonly Command[] = [
           priority: priorityFilter(values.priority),
           notes: values.notes,
           done: values.done === true ? true : values["not-done"] === true ? false : undefined,
+          move: values.move === undefined ? undefined : parseItemMove(values.move),
         };
         if (Object.values(changes).every(value => value === undefined)) {
           throw new UsageError("nothing to change: give a description or an option");
         }
         const item = await editItem(todoList(store, context.listKey), parseItemId(id), changes);
-        return { text: renderItemsDetails([item]), json: item };
+        return { text: renderItemsDetails([item], context.style), json: item };
       }),
   },
   itemsCommand,
@@ -228,7 +240,10 @@ const ITEM_COMMANDS: readonly Command[] = [
     run: context =>
       withStore(context, async store => {
         const items = await getItems(todoList(store, context.listKey), parseItemIds(context.args));
-        return { text: renderItemsDetails(items), json: { list: context.listKey, items } };
+        return {
+          text: renderItemsDetails(items, context.style),
+          json: { list: context.listKey, items },
+        };
       }),
   },
   {
@@ -250,18 +265,55 @@ const ITEM_COMMANDS: readonly Command[] = [
   {
     name: "prompt",
     aliases: [],
-    usage: "[<id>...] [--section=<name>]",
+    usage: "[<id>...] [--section=<name>] [--sort=<position|priority>]",
     summary: "Print a task brief for an agent from the pending Items, or the selected ones.",
-    options: ["list", "section"],
+    options: ["list", "section", "sort"],
     run: context =>
       withStore(context, async store => ({
         text: await buildPrompt(todoList(store, context.listKey), {
           ids: context.args.map(parseItemId),
           section: context.values.section,
+          sort: itemFilter(context.values).sort,
         }),
       })),
   },
+  {
+    name: "export",
+    aliases: [],
+    usage: "[--no-ids] > TODO.md",
+    summary: "Like `list export`, on the List from --list, $TODO_LIST, or 'default'.",
+    options: ["list", "no-ids"],
+    run: context => {
+      noArgs(context.args);
+      return exportMarkdown(context, context.listKey);
+    },
+  },
+  {
+    name: "import",
+    aliases: [],
+    usage: "< TODO.md",
+    summary: "Like `list import`, on the List from --list, $TODO_LIST, or 'default'.",
+    options: ["list"],
+    run: context => {
+      noArgs(context.args);
+      return importMarkdown(context, context.listKey);
+    },
+  },
 ];
+
+const importMarkdown = (context: CommandContext, key: string) =>
+  withStore(context, async store => {
+    const items = await importList(store, key, await context.readStdin());
+    return {
+      text: `Imported ${items.length} items into ${key}\n`,
+      json: { list: key, items },
+    };
+  });
+
+const exportMarkdown = (context: CommandContext, key: string) =>
+  withStore(context, async store => ({
+    text: await exportList(store, key, { ids: context.values["no-ids"] !== true }),
+  }));
 
 const transfer = (context: CommandContext, move: boolean) =>
   withStore(context, async store => {
@@ -275,7 +327,7 @@ const transfer = (context: CommandContext, move: boolean) =>
     const items = await (move ? moveItems : copyItems)(list, parseItemIds(ids), target);
     const verb = move ? "Moved" : "Copied";
     return {
-      text: renderItemsChanged(`${verb} to ${target}:`, items),
+      text: renderItemsChanged(`${verb} to ${target}:`, items, context.style),
       json: { list: target, items },
     };
   });
@@ -310,14 +362,15 @@ const LIST_COMMANDS: readonly Command[] = [
   {
     name: "show",
     aliases: [],
-    usage: "<key> [--all] [--section=<name>] [--priority=<high|medium|low|none>]",
+    usage:
+      "<key> [--all] [--section=<name>] [--priority=<high|medium|low|none>] [--sort=<position|priority>]",
     summary: "Show a List's description and Items. Works on Archived Lists.",
-    options: ["all", "section", "priority"],
+    options: ["all", "section", "priority", "sort"],
     run: context =>
       withStore(context, async store => {
         const key = oneArg(context.args, "the list key");
         const { list, items } = await showList(store, key, itemFilter(context.values));
-        return { text: renderListWithItems(list, items), json: { list, items } };
+        return { text: renderListWithItems(list, items, context.style), json: { list, items } };
       }),
   },
   {
@@ -389,28 +442,19 @@ const LIST_COMMANDS: readonly Command[] = [
     name: "import",
     aliases: [],
     usage: "<key> < TODO.md",
-    summary: "Merge a Markdown task list from stdin into a List, creating it if missing.",
+    summary:
+      "Merge a Markdown task list from stdin into a List, creating it if missing. Lines with this List's Item IDs update those Items.",
     options: [],
-    run: context =>
-      withStore(context, async store => {
-        const key = oneArg(context.args, "the list key");
-        const items = await importList(store, key, await context.readStdin());
-        return {
-          text: `Imported ${items.length} items into ${key}\n`,
-          json: { list: key, items },
-        };
-      }),
+    run: context => importMarkdown(context, oneArg(context.args, "the list key")),
   },
   {
     name: "export",
     aliases: [],
-    usage: "<key> > TODO.md",
-    summary: "Print a List as a Markdown task list. Always Markdown, even in JSON mode.",
-    options: [],
-    run: context =>
-      withStore(context, async store => ({
-        text: await exportList(store, oneArg(context.args, "the list key")),
-      })),
+    usage: "<key> [--no-ids] > TODO.md",
+    summary:
+      "Print a List as a Markdown task list, with Item IDs unless --no-ids. Always Markdown, even in JSON mode.",
+    options: ["no-ids"],
+    run: context => exportMarkdown(context, oneArg(context.args, "the list key")),
   },
   {
     name: "copy",
@@ -450,7 +494,7 @@ const LIST_COMMANDS: readonly Command[] = [
         const key = oneArg(context.args, "the list key");
         const removed = await cleanupList(store, key);
         return {
-          text: renderItemsChanged("Merged duplicates, removing:", removed),
+          text: renderItemsChanged("Merged duplicates, removing:", removed, context.style),
           json: { list: key, removed },
         };
       }),

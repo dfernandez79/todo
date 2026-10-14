@@ -2,10 +2,12 @@ import { sql } from "kysely";
 
 import { TodoError } from "./errors.ts";
 import { type ItemFilter, filterItems, mergeIntoList } from "./items.ts";
-import { parseMarkdown, renderMarkdown } from "./markdown.ts";
+import { type RenderOptions, parseMarkdown, renderMarkdown } from "./markdown.ts";
 import { duplicateKey, mergeDuplicate } from "./merge.ts";
 import {
+  type ItemRow,
   type ListRow,
+  deleteItemRows,
   ensureWritableListRow,
   findListRow,
   getActiveListRow,
@@ -13,6 +15,7 @@ import {
   insertListRow,
   loadItemRows,
   loadListRows,
+  setItemPosition,
   setListArchivedAt,
   setListDescription,
   toDraft,
@@ -158,7 +161,7 @@ const copyRows = async (tx: StoreContext, source: ListRow, targetKey: string) =>
     existing === undefined && source.description !== null
       ? await touchListRow(tx, target, { description: source.description })
       : target;
-  const rows = (await loadItemRows(tx, source.id)).toSorted((a, b) => a.number - b.number);
+  const rows = await loadItemRows(tx, source.id);
   await mergeIntoList(tx, withDescription, rows.map(toDraft));
   return withDescription;
 };
@@ -189,50 +192,68 @@ const moveList = (store: TodoStore, from: string, to: string): Promise<ListSumma
   });
 
 /**
+ * Merges each group of Duplicate Items into the one with the lowest Item ID,
+ * which keeps its Position. With `only`, merges just the groups holding one of
+ * those row IDs. Returns the rows removed, and the survivor of every merged row.
+ */
+const mergeDuplicateRows = async (
+  tx: StoreContext,
+  rows: readonly ItemRow[],
+  only?: ReadonlySet<string>,
+) => {
+  const groups = Map.groupBy(
+    rows.toSorted((a, b) => a.number - b.number),
+    row => duplicateKey(toDraft(row)),
+  );
+  const removed: ItemRow[] = [];
+  const survivorOf = new Map<string, ItemRow>();
+  for (const group of groups.values()) {
+    if (group.length < 2 || (only !== undefined && !group.some(row => only.has(row.id)))) continue;
+    const [first, ...rest] = group as [ItemRow, ...ItemRow[]];
+    const draft = rest.reduce(
+      (merged, row) => mergeDuplicate(merged, toDraft(row)),
+      toDraft(first),
+    );
+    const survivor = await updateItemRow(tx, first, draft);
+    for (const row of group) survivorOf.set(row.id, survivor);
+    removed.push(...rest);
+  }
+  await deleteItemRows(tx, removed);
+  return { removed: removed.toSorted((a, b) => a.number - b.number), survivorOf };
+};
+
+/**
  * Merges the Duplicate Items of a List into the one with the lowest Item ID.
  * Returns the Items removed.
  */
 const cleanupList = (store: TodoStore, key: string): Promise<Item[]> =>
   inTransaction(store, async tx => {
     const row = await getActiveListRow(tx, parseListKey(key));
-    const rows = (await loadItemRows(tx, row.id)).toSorted((a, b) => a.number - b.number);
-    const kept = new Map<string, { row: (typeof rows)[number]; draft: ItemDraft }>();
-    const removed: typeof rows = [];
-    for (const item of rows) {
-      const draft = toDraft(item);
-      const duplicate = duplicateKey(draft);
-      const survivor = kept.get(duplicate);
-      if (survivor === undefined) kept.set(duplicate, { row: item, draft });
-      else {
-        survivor.draft = mergeDuplicate(survivor.draft, draft);
-        removed.push(item);
-      }
-    }
-    for (const { row: item, draft } of kept.values()) await updateItemRow(tx, item, draft);
-    if (removed.length > 0) {
-      await tx.db
-        .deleteFrom("todo_items")
-        .where(
-          "id",
-          "in",
-          removed.map(item => item.id),
-        )
-        .execute();
-    }
+    const { removed } = await mergeDuplicateRows(tx, await loadItemRows(tx, row.id));
     return removed.map(item => toItem(item, row.key));
   });
 
-/** A List as Markdown; works on Archived Lists too. */
-const exportList = async (store: TodoStore, key: string): Promise<string> => {
+/** A List as Markdown, by Position, with Item IDs unless `ids` is false; works on Archived Lists too. */
+const exportList = async (
+  store: TodoStore,
+  key: string,
+  options: RenderOptions = {},
+): Promise<string> => {
   const row = await getListRow(store, parseListKey(key));
   const items = (await loadItemRows(store, row.id)).map(item => toItem(item, row.key));
-  return renderMarkdown(toList(row), items);
+  return renderMarkdown(toList(row), items, options);
 };
 
 /**
- * Merges the Items of a Markdown task list into a List, which is created if
- * missing. The Markdown's description is used only if the List has none.
- * Returns the resulting Items.
+ * Imports a Markdown task list into a List, which is created if missing. The
+ * Markdown's description is used only if the List has none.
+ *
+ * When the Markdown's `# key` is the List's, or it has none, an Item ID on a
+ * line updates that Item, and the updated Items swap into the Positions they
+ * held, in the Markdown's order; an update that makes Duplicate Items merges
+ * them. Every other line merges into the List as a copy would, and new Items
+ * go last. Import never removes an Item that the Markdown leaves out.
+ * Returns the resulting Item for each line.
  */
 const importList = (store: TodoStore, key: string, markdown: string): Promise<Item[]> =>
   inTransaction(store, async tx => {
@@ -243,12 +264,39 @@ const importList = (store: TodoStore, key: string, markdown: string): Promise<It
       row = await touchListRow(tx, row, { description: parsed.description });
     }
     const now = tx.now();
-    const drafts = parsed.items.map(({ done, ...item }) => ({
-      ...item,
-      doneAt: done ? now : undefined,
-    }));
-    const rows = await mergeIntoList(tx, row, drafts);
-    return rows.map(item => toItem(item, row.key));
+    const useIds = parsed.key === undefined || parsed.key === listKey;
+    const byNumber = new Map((await loadItemRows(tx, row.id)).map(item => [item.number, item]));
+    const results: ItemRow[] = [];
+    const updated: { index: number; row: ItemRow }[] = [];
+    const added: { index: number; draft: ItemDraft }[] = [];
+    for (const [index, { id, done, ...fields }] of parsed.items.entries()) {
+      const existing = useIds && id !== undefined ? byNumber.get(id) : undefined;
+      if (existing === undefined) {
+        added.push({ index, draft: { ...fields, doneAt: done ? now : undefined } });
+        continue;
+      }
+      const doneAt = done ? (existing.done_at ?? now) : undefined;
+      updated.push({ index, row: await updateItemRow(tx, existing, { ...fields, doneAt }) });
+    }
+
+    const slots = updated.map(item => item.row.position).toSorted((a, b) => a - b);
+    for (const [i, item] of updated.entries()) {
+      item.row = await setItemPosition(tx, item.row, slots[i]!);
+    }
+    const { survivorOf } = await mergeDuplicateRows(
+      tx,
+      await loadItemRows(tx, row.id),
+      new Set(updated.map(item => item.row.id)),
+    );
+    for (const item of updated) results[item.index] = survivorOf.get(item.row.id) ?? item.row;
+
+    const merged = await mergeIntoList(
+      tx,
+      row,
+      added.map(item => item.draft),
+    );
+    for (const [i, item] of added.entries()) results[item.index] = merged[i]!;
+    return results.map(item => toItem(item, row.key));
   });
 
 export {
