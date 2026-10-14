@@ -58,7 +58,8 @@ in [docs/adr](./adr).
   - Every command has `--help` with its syntax.
   - `todo guide` prints a Markdown usage guide for agents: workflow, environment
     variables, JSON shapes, and examples.
-  - Commands never ask for interactive confirmation.
+  - Commands never ask for interactive confirmation. `todo edit` with no Item ID
+    is the only command that opens an editor, and only when a person runs it.
 - Items are referenced only by their Item ID.
 - It can return a Prompt based on selected Items or Sections (see
   `todo prompt`).
@@ -66,6 +67,7 @@ in [docs/adr](./adr).
 - Sections are displayed in alphabetical order, which allows using the Section
   name to determine the display order: `01 - UI`.
 - It can import or export a List from Markdown.
+- A person can edit a whole List as Markdown in their editor (`todo edit`).
 
 ## Configuration
 
@@ -76,6 +78,7 @@ in [docs/adr](./adr).
 | Output format | `--json`                | `TODO_FORMAT=json`                   | text              |
 | Color         | `--color`, `--no-color` | `FORCE_COLOR=1`, `NO_COLOR=1`        | on in a terminal  |
 | Auto-migrate  |                         | `TODO_NO_AUTO_MIGRATE=1` disables it | enabled           |
+| Editor        |                         | `VISUAL`, then `EDITOR`              | none: an error    |
 
 - A flag wins over the environment variable, which wins over the default.
 - A database value starting with `postgres://` (or `postgresql://`) selects
@@ -163,7 +166,8 @@ missing List fail, except for the `default` List, which reads as empty.
 - `remove` (alias `rm`)
 - `done` (alias `d`, `x`); accepts Item IDs, `--section`, or `--all-items`
 - `edit` (alias `e`); accepts `--section`, `--priority`, `--notes`, `--done`,
-  `--not-done`, and `--move`
+  `--not-done`, and `--move`. Without an Item ID or options, it opens the List
+  in an editor (see [Editing a List](#editing-a-list)).
 - `items` (alias `ls`; also used when no command is given); accepts `--all`,
   `--section`, `--priority`, `--sort`, and `--no-ids`
 - `show` (show the details of one or more Items)
@@ -173,7 +177,8 @@ missing List fail, except for the `default` List, which reads as empty.
 - `prompt` (prints a Prompt for the selected Items)
 - `export` (same as `todo list export <key>` on the List from `--list`,
   `TODO_LIST`, or `default`); accepts `--no-ids`
-- `import` (same as `todo list import <key>` on that List)
+- `import` (same as `todo list import <key>` on that List); accepts
+  `--remove-missing`
 
 In `cp` and `mv`, the last argument is the target List Key. Because List Keys
 start with a letter, it can't be confused with an Item ID.
@@ -268,6 +273,11 @@ todo prompt --section="01 - UI"
 # Export the default list to Markdown, and import it back
 todo export > TODO.md
 todo import < TODO.md
+# Import it back, removing the Items the file leaves out
+todo import --remove-missing < TODO.md
+
+# Edit the default list as Markdown in $VISUAL or $EDITOR
+todo edit
 
 # Print the usage guide for agents
 todo guide
@@ -299,7 +309,7 @@ List.
 - `remove` (alias `rm`); a non-empty List requires `--force`
 - `archive` / `unarchive`
 - `edit` (alias `e`)
-- `import`
+- `import`; accepts `--remove-missing`
 - `export`
 - `copy`
 - `move` (alias `mv`)
@@ -348,6 +358,8 @@ todo list export test-1 --no-ids > TODO.md
 
 # Import the list from Markdown
 todo list import test-1 < TODO.md
+# Make the list match the Markdown, removing the Items it leaves out
+todo list import test-1 --remove-missing < TODO.md
 
 # Make a copy of a list
 todo list copy test-1 test-2
@@ -408,8 +420,10 @@ Optional list description.
   reads it at the start of the line: ``- [ ] `id:2` Pending item (!low)``. An ID
   at both ends of a line, or the same ID on two lines, is invalid input.
 - `todo ls` prints Items in the same line format, with their IDs.
+- Import ignores any other line, such as a paragraph between Items.
 
-Import never deletes Items: Items the file leaves out stay as they are.
+Without `--remove-missing`, import never deletes Items: Items the file leaves
+out stay as they are.
 
 The Item IDs in the file apply when its `# <key>` is the target List's, or when
 it has no `# <key>`. Otherwise the import ignores them, because IDs are unique
@@ -427,13 +441,56 @@ only within their List. When they apply:
 Lines without an applicable ID merge into the List using the
 [merge rule](#merge-rule), and new Items go last, in the file's order.
 
+The output lists the resulting Item of each line, and the IDs of the Items it
+removed: `{"list": "<key>", "items": [...], "removed": [3, 7]}`. In text, it is
+`Imported 4 items into list-1, removed 2`. Without `--remove-missing`, `removed`
+is always empty.
+
+### Import with `--remove-missing`
+
+`--remove-missing` makes the List match the file:
+
+- After the lines are imported, it removes every Item that no line matched. A
+  line matches the Item whose ID it has, or the Item it merged into as a
+  Duplicate Item.
+- The file's description replaces the List's, and a file without one clears it.
+- A file whose `# <key>` names another List is invalid input, because none of
+  its IDs would apply and every Item would be removed.
+
+### Editing a List
+
+`todo edit` with no Item ID and no options edits the List from `--list`,
+`TODO_LIST`, or `default` as Markdown:
+
+1. It writes `todo export` of the List, with all Items and their IDs, to a
+   temporary file. A List that doesn't exist yet is just `# <key>`. An Archived
+   List fails before the editor opens.
+2. It opens the file in `$VISUAL`, or else `$EDITOR`, run through the shell so
+   commands like `code --wait` work. Without either, it fails.
+3. After the editor exits, it imports the file with `--remove-missing`:
+   - A line with an Item's ID updates that Item.
+   - A removed line removes its Item.
+   - A new line adds an Item, or merges into its Duplicate Item.
+   - Other lines are ignored.
+
+Nothing changes when:
+
+- The editor exits with an error (`EDITOR_FAILED`), or the file is saved
+  unchanged.
+- The file is invalid (`INVALID_INPUT`), or the List changed while the editor
+  was open (`LIST_CHANGED`). The error names the temporary file, which is kept
+  so the edits can be fixed and imported with `todo import --remove-missing`.
+
+A List that doesn't exist is created only if the file has Items or a
+description. The output is the same as the import's.
+
 ## TypeScript API
 
 The package also provides a TypeScript API to manage a todo list. The API covers
 the same functionality available in the CLI.
 
 ```typescript
-import { addItem, todoList, todoListStore } from "@diegoux/todo";
+import { addItem, importList, todoList, todoListStore } from "@diegoux/todo";
 
 // a postgres:// URL or a SQLite file path; runs pending migrations
 const store = await todoListStore("/path/to/todo.db");
@@ -442,6 +499,10 @@ try {
   const list = todoList(store, "list-1");
   // add item to the list
   await addItem(list, "New Description");
+  // make the list match a Markdown task list
+  const { items, removed } = await importList(store, "list-1", markdown, {
+    removeMissing: true,
+  });
 } finally {
   await store.close();
 }

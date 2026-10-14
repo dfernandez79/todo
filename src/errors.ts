@@ -5,6 +5,8 @@ const TODO_ERROR_CODES = [
   "LIST_NOT_EMPTY",
   "ITEM_NOT_FOUND",
   "INVALID_INPUT",
+  "LIST_CHANGED",
+  "EDITOR_FAILED",
 ] as const;
 
 type TodoErrorCode = (typeof TODO_ERROR_CODES)[number];

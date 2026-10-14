@@ -118,7 +118,8 @@ const dedent = (lines: readonly string[]): string => {
  * Reads a Markdown task list: `# key`, an optional description paragraph,
  * `## Section` headings, and `- [ ]` / `- [x]` items with an optional
  * `(!priority)` mark and indented notes. An item's ID, `` `id:3` ``, may start
- * or end its line; the same ID twice is INVALID_INPUT.
+ * or end its line; the same ID twice is INVALID_INPUT. Other lines after the
+ * description are ignored.
  */
 const parseMarkdown = (markdown: string): ParsedList => {
   const result: ParsedList = { items: [] };
@@ -169,14 +170,7 @@ const parseMarkdown = (markdown: string): ParsedList => {
       }
       return;
     }
-    if (!started) {
-      description.push(line.trim());
-      return;
-    }
-    throw new TodoError(
-      "INVALID_INPUT",
-      `line ${index + 1}: expected a '- [ ]' item or a '## Section' heading, got '${line.trim()}'`,
-    );
+    if (!started) description.push(line.trim());
   });
   finishItem();
 

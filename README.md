@@ -47,6 +47,8 @@ todo list export proj-1 > TODO.md
 todo list import proj-1 < TODO.md
 todo export > TODO.md      # same as list export, on the default List
 todo import < TODO.md      # same as list import, on the default List
+todo import --remove-missing < TODO.md   # also remove the Items the file leaves out
+todo edit                  # edit the default List as Markdown in $VISUAL or $EDITOR
 todo guide                 # the usage guide for agents
 todo --help
 ```
@@ -72,13 +74,14 @@ Each Item also has a Position: its place in the order you keep for the List.
 | `items`               | `ls`     | List pending Items. The default command. Takes `--all`, `--section`, `--priority`, `--sort`, `--no-ids`. |
 | `show <id>...`        |          | Show Items with their notes.                                                                             |
 | `edit <id> [<desc>]`  | `e`      | Change an Item. Takes `--section`, `--priority`, `--notes`, `--done`, `--not-done`, `--move`.            |
+| `edit`                | `e`      | Edit the whole List as Markdown in `$VISUAL` or `$EDITOR`. See [Editing a List](#editing-a-list).        |
 | `done <id>...`        | `d`, `x` | Mark Items done. `--section=<name>` or `--all-items` mark many.                                          |
 | `remove <id>...`      | `rm`     | Remove Items.                                                                                            |
 | `copy <id>... <list>` | `cp`     | Copy Items to another List. Copies get new IDs.                                                          |
 | `move <id>... <list>` | `mv`     | Copy, then remove the source Items.                                                                      |
 | `prompt [<id>...]`    |          | Print a task brief of the pending Items. Takes `--section`, `--sort`.                                    |
 | `export`              |          | `list export` on the List from `--list`, `$TODO_LIST`, or `default`. Takes `--no-ids`.                   |
-| `import`              |          | `list import` on that List.                                                                              |
+| `import`              |          | `list import` on that List. Takes `--remove-missing`.                                                    |
 | `guide`               |          | Print the usage guide for agents.                                                                        |
 
 In `edit`, `--section=""` and `--notes=""` clear the field, and
@@ -102,7 +105,7 @@ Done Items, which `todo ls` hides, and doesn't change the Item's `updatedAt`.
 | `list mv <from> <to>`     | Rename a List if `<to>` doesn't exist; otherwise copy onto it and remove it. |
 | `list cleanup <key>`      | Merge the List's Duplicate Items.                                            |
 | `list export <key>`       | Print the List as a Markdown task list. `--no-ids` leaves the Item IDs out.  |
-| `list import <key>`       | Merge a Markdown task list from stdin into the List.                         |
+| `list import <key>`       | Merge a Markdown task list from stdin. Takes `--remove-missing`.             |
 | `db migrate`              | Run database migrations. Needed only with `TODO_NO_AUTO_MIGRATE=1`.          |
 
 Run `todo <command> --help` for a command's options.
@@ -172,11 +175,26 @@ Items are in Position order. Each line ends with the Item ID, written
 `` `id:3` ``; `list export --no-ids` leaves it out. `todo ls` prints the same
 lines.
 
-Importing never removes Items. The file's description is used only if the List
-has none. When the file's `# <key>` is the List's, or it has none, a line's ID
-(at its start, or as its very last token) updates that Item, which keeps its
-Position among the updated Items in the file's order. Other lines merge into the
-List as Duplicate Items do, and new Items go last.
+When the file's `# <key>` is the List's, or it has none, a line's ID (at its
+start, or as its very last token) updates that Item, which keeps its Position
+among the updated Items in the file's order. Other task lines merge into the
+List as Duplicate Items do, and new Items go last. Any other text is ignored.
+
+By default, importing never removes Items, and the file's description is used
+only if the List has none. With `--remove-missing`, the List matches the file:
+Items that no line updated or merged into are removed, and the file's
+description replaces the List's. A file of another List is then an error.
+
+## Editing a List
+
+`todo edit` with no Item ID opens the List's Markdown, as `todo export` writes
+it, in `$VISUAL` or `$EDITOR`. When the editor exits, the file is imported with
+`--remove-missing`: changed lines update their Items, deleted lines remove them,
+and new lines add Items.
+
+Nothing changes if the editor fails or the file is saved unchanged. If the file
+is invalid, or the List changed while the editor was open, nothing changes and
+the error names the file, which is kept.
 
 ## Exit codes
 

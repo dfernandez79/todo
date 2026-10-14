@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, test } from "bun:test";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { tempDir } from "./test-helpers/databases.ts";
@@ -7,9 +8,14 @@ type Run = { code: number; stdout: string; stderr: string };
 
 const ROOT = join(import.meta.dir, "..");
 
-const run = async (command: string[], stdin?: string): Promise<Run> => {
+const run = async (
+  command: string[],
+  stdin?: string,
+  env: Record<string, string> = {},
+): Promise<Run> => {
   const proc = Bun.spawn(command, {
     cwd: ROOT,
+    env: { ...process.env, ...env },
     stdin: stdin === undefined ? "ignore" : new Blob([stdin]),
     stdout: "pipe",
     stderr: "pipe",
@@ -37,8 +43,8 @@ const NODE = findNode();
 
 describe.skipIf(NODE === undefined)("the built command, on Node", () => {
   let db = "";
-  const todo = (args: string[], stdin?: string) =>
-    run([NODE!, "dist/todo.js", ...args, `--db=${db}`], stdin);
+  const todo = (args: string[], stdin?: string, env?: Record<string, string>) =>
+    run([NODE!, "dist/todo.js", ...args, `--db=${db}`], stdin, env);
 
   beforeAll(async () => {
     const build = await run([process.execPath, "run", "build"]);
@@ -57,7 +63,27 @@ describe.skipIf(NODE === undefined)("the built command, on Node", () => {
 
   test("imports Markdown from stdin", async () => {
     const result = await todo(["list", "import", "imported"], "- [ ] One\n- [x] Two\n");
-    expect(result).toEqual({ code: 0, stdout: "Imported 2 items into imported\n", stderr: "" });
+    expect(result).toEqual({
+      code: 0,
+      stdout: "Imported 2 items into imported, removed 0\n",
+      stderr: "",
+    });
+  });
+
+  test("edits a List in the editor from $EDITOR, run through the shell", async () => {
+    await todo(["add", "Old", "--list=edited"]);
+    const replacement = join(await tempDir(), "edited.md");
+    await writeFile(replacement, "# edited\n\n- [ ] New\n");
+    const result = await todo(["edit", "--list=edited"], undefined, {
+      VISUAL: "",
+      EDITOR: `cp '${replacement}'`,
+    });
+    expect(result).toEqual({
+      code: 0,
+      stdout: "Imported 1 items into edited, removed 1\n",
+      stderr: "",
+    });
+    expect((await todo(["export", "--list=edited"])).stdout).toBe("# edited\n\n- [ ] New `id:2`\n");
   });
 
   test("exits 2 on a usage error", async () => {

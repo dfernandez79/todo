@@ -25,6 +25,8 @@ export {
   editList,
   exportList,
   getListSummary,
+  type ImportOptions,
+  type ImportResult,
   importList,
   listLists,
   moveList,

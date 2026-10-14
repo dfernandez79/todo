@@ -4,6 +4,7 @@ import {
   addItem,
   buildPrompt,
   createList,
+  importList,
   listItems,
   listLists,
   markDone,
@@ -37,6 +38,11 @@ describe.each(DATABASES)("the TypeScript API on $name", database => {
       await markDone(list, [1]);
       expect(await listItems(list)).toEqual([]);
       expect((await listLists(store)).map(l => [l.key, l.done])).toEqual([["list-1", 1]]);
+      const imported = await importList(store, "list-1", "- [ ] Replacement\n", {
+        removeMissing: true,
+      });
+      expect(imported.items.map(i => [i.id, i.description])).toEqual([[2, "Replacement"]]);
+      expect(imported.removed).toEqual([1]);
     } finally {
       await store.close();
     }

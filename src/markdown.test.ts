@@ -87,13 +87,13 @@ describe("parseMarkdown", () => {
     ]);
   });
 
-  test("rejects text between items, naming the line", () => {
-    expect(() => parseMarkdown("- [ ] One\n\nA stray paragraph.\n")).toThrow(
-      new TodoError(
-        "INVALID_INPUT",
-        "line 3: expected a '- [ ]' item or a '## Section' heading, got 'A stray paragraph.'",
-      ),
-    );
+  test("ignores text between items", () => {
+    const parsed = parseMarkdown("- [ ] One\n\nA stray paragraph.\n\n## UI\n\nMore.\n- [ ] Two\n");
+    expect(parsed.items.map(i => [i.description, i.section, i.notes])).toEqual([
+      ["One", undefined, undefined],
+      ["Two", "UI", undefined],
+    ]);
+    expect(parsed.description).toBeUndefined();
   });
 
   test("reads an Item ID at the start or the very end of a line", () => {

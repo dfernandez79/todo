@@ -56,9 +56,11 @@ deletes. Copying or moving an Item to another List gives it a new ID there.
   \`todo list rm <key> [--force]\`, \`todo list copy <from> <to>\`,
   \`todo list mv <from> <to>\`, \`todo list cleanup <key>\`,
   \`todo list export <key> [--no-ids] > TODO.md\`,
-  \`todo list import <key> < TODO.md\`.
-- \`todo export [--no-ids]\`, \`todo import\`: the same, on the List from
-  \`--list\` or \`TODO_LIST\`.
+  \`todo list import <key> [--remove-missing] < TODO.md\`.
+- \`todo export [--no-ids]\`, \`todo import [--remove-missing]\`: the same, on
+  the List from \`--list\` or \`TODO_LIST\`.
+- \`todo edit\` with no Item ID opens the List in \`$VISUAL\` or \`$EDITOR\` for a
+  person. Agents should use the commands above instead.
 
 Run \`todo <command> --help\` for details.
 
@@ -79,15 +81,19 @@ Run \`todo <command> --help\` for details.
 - \`todo ls\` and \`todo list export\` write an Item as
   \`\` - [ ] Fix login (!high) \`id:3\` \`\`. Importing Markdown of the same List updates
   the Items whose IDs it names (at the start or the very end of a line) and
-  keeps the rest.
+  keeps the rest. With \`--remove-missing\`, it removes the Items the file
+  leaves out and takes the file's description. Text that isn't an Item is
+  ignored.
 
 ## JSON output
 
 With \`--json\` or \`TODO_FORMAT=json\`, commands print one JSON value:
 
-- \`todo ls\`, \`todo show\`, \`todo done\`, \`todo cp\`, \`todo mv\`, \`todo import\`, \`todo list import\`:
+- \`todo ls\`, \`todo show\`, \`todo done\`, \`todo cp\`, \`todo mv\`:
   \`{"list": "<key>", "items": [Item, ...]}\`
-- \`todo add\`, \`todo edit\`: \`Item\`
+- \`todo import\`, \`todo list import\`, \`todo edit\` with no Item ID:
+  \`{"list": "<key>", "items": [Item, ...], "removed": [<id>, ...]}\`
+- \`todo add\`, \`todo edit <id>\`: \`Item\`
 - \`todo rm\`, \`todo list cleanup\`: \`{"list": "<key>", "removed": [Item, ...]}\`
 - \`todo list ls\`: \`{"lists": [List, ...]}\`
 - \`todo list show\`: \`{"list": List, "items": [Item, ...]}\`
@@ -103,7 +109,8 @@ An Item is \`{"list", "id", "description", "notes"?, "section"?, "priority"?,
 Errors exit non-zero (2 for a bad invocation, 1 otherwise). In JSON mode they
 print \`{"error": {"code": "...", "message": "..."}}\` on stdout. Codes:
 \`USAGE\`, \`LIST_NOT_FOUND\`, \`LIST_EXISTS\`, \`LIST_ARCHIVED\`, \`LIST_NOT_EMPTY\`,
-\`ITEM_NOT_FOUND\`, \`INVALID_INPUT\`, \`INTERNAL\`.
+\`ITEM_NOT_FOUND\`, \`INVALID_INPUT\`, \`LIST_CHANGED\`, \`EDITOR_FAILED\`,
+\`INTERNAL\`.
 `;
 
 export { GUIDE };

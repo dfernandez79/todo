@@ -10,14 +10,25 @@ type Todo = {
   json: <T = unknown>(args: string[], stdin?: string) => Promise<T>;
 };
 
+/** Stands in for the editor: gets its command and the file, edits it, and returns its exit code. */
+type FakeEditor = (command: string, file: string) => Promise<number>;
+
+const noEditor: FakeEditor = () => {
+  throw new Error("the test opened an editor it didn't expect");
+};
+
 /** A `todo` command line bound to one database, run in-process. */
-const todoCli = (database: string, env: Record<string, string> = {}): Todo => {
+const todoCli = (
+  database: string,
+  env: Record<string, string> = {},
+  editor: FakeEditor = noEditor,
+): Todo => {
   const run = async (args: string[], stdin = ""): Promise<Run> => {
     const stdout = captureOutput();
     const stderr = captureOutput();
     const code = await runCli(
       args,
-      { stdout, stderr, readStdin: async () => stdin },
+      { stdout, stderr, readStdin: async () => stdin, runEditor: editor },
       { env: { TODO_DATABASE_URL: database, ...env }, homedir: "/nonexistent-home" },
     );
     return { code, stdout: stdout.text(), stderr: stderr.text() };
@@ -34,4 +45,4 @@ const todoCli = (database: string, env: Record<string, string> = {}): Todo => {
   return Object.assign(run, { json });
 };
 
-export { type Run, type Todo, todoCli };
+export { type FakeEditor, type Run, type Todo, todoCli };

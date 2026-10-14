@@ -10,6 +10,7 @@ const OPTIONS = {
   sort: { type: "string" },
   move: { type: "string" },
   "no-ids": { type: "boolean" },
+  "remove-missing": { type: "boolean" },
   description: { type: "string" },
   all: { type: "boolean", short: "a" },
   "all-items": { type: "boolean" },

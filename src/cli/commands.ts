@@ -1,4 +1,8 @@
-import { UsageError } from "../errors.ts";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { TodoError, UsageError } from "../errors.ts";
 import {
   type ItemChanges,
   type ItemFilter,
@@ -22,8 +26,11 @@ import {
   editList,
   exportList,
   getListSummary,
+  type ImportResult,
+  importEditedList,
   importList,
   listLists,
+  listMarkdownToEdit,
   moveList,
   removeList,
   showList,
@@ -53,6 +60,8 @@ type CommandContext = {
   listKey: string;
   openStore: () => Promise<TodoStore>;
   readStdin: () => Promise<string>;
+  /** Opens a file in the user's editor, returning once they close it. */
+  openEditor: (file: string) => Promise<void>;
 };
 
 /** What a command prints: `text`, or `json` in JSON mode. Without `json`, always `text`. */
@@ -203,15 +212,21 @@ const ITEM_COMMANDS: readonly Command[] = [
     name: "edit",
     aliases: ["e"],
     usage:
-      "<id> [<description>] [--section=<name>] [--priority=<high|medium|low|none>] [--notes=<text>] [--done | --not-done] [--move=<up|down|top|bottom>]",
+      "[<id> [<description>] [--section=<name>] [--priority=<high|medium|low|none>] [--notes=<text>] [--done | --not-done] [--move=<up|down|top|bottom>]]",
     summary:
-      'Change an Item. --section="" and --notes="" clear them; --priority=none clears it. --move moves it within its Section.',
+      'Change an Item. --section="" and --notes="" clear them; --priority=none clears it. --move moves it within its Section. Without an <id>, edit the whole List as Markdown in $VISUAL or $EDITOR.',
     options: ["list", "section", "priority", "notes", "done", "not-done", "move"],
-    run: context =>
-      withStore(context, async store => {
+    run: context => {
+      const { values } = context;
+      const changeOptions = [values.section, values.priority, values.notes, values.move];
+      const noOptions =
+        changeOptions.every(value => value === undefined) &&
+        values.done !== true &&
+        values["not-done"] !== true;
+      if (context.args.length === 0 && noOptions) return editMarkdown(context);
+      return withStore(context, async store => {
         const [id, ...words] = context.args;
         if (id === undefined) throw new UsageError("missing the item ID");
-        const { values } = context;
         if (values.done === true && values["not-done"] === true) {
           throw new UsageError("--done and --not-done conflict");
         }
@@ -228,7 +243,8 @@ const ITEM_COMMANDS: readonly Command[] = [
         }
         const item = await editItem(todoList(store, context.listKey), parseItemId(id), changes);
         return { text: renderItemsDetails([item], context.style), json: item };
-      }),
+      });
+    },
   },
   itemsCommand,
   {
@@ -291,9 +307,9 @@ const ITEM_COMMANDS: readonly Command[] = [
   {
     name: "import",
     aliases: [],
-    usage: "< TODO.md",
+    usage: "[--remove-missing] < TODO.md",
     summary: "Like `list import`, on the List from --list, $TODO_LIST, or 'default'.",
-    options: ["list"],
+    options: ["list", "remove-missing"],
     run: context => {
       noArgs(context.args);
       return importMarkdown(context, context.listKey);
@@ -301,13 +317,46 @@ const ITEM_COMMANDS: readonly Command[] = [
   },
 ];
 
+const imported = (key: string, { items, removed }: ImportResult): CommandResult => ({
+  text: `Imported ${items.length} items into ${key}, removed ${removed.length}\n`,
+  json: { list: key, items, removed },
+});
+
 const importMarkdown = (context: CommandContext, key: string) =>
   withStore(context, async store => {
-    const items = await importList(store, key, await context.readStdin());
-    return {
-      text: `Imported ${items.length} items into ${key}\n`,
-      json: { list: key, items },
-    };
+    const markdown = await context.readStdin();
+    const removeMissing = context.values["remove-missing"] === true;
+    return imported(key, await importList(store, key, markdown, { removeMissing }));
+  });
+
+/**
+ * Opens the List's Markdown in the editor and imports the edits with
+ * --remove-missing. If they can't be imported, the file is kept for the user.
+ */
+const editMarkdown = (context: CommandContext) =>
+  withStore(context, async store => {
+    const key = context.listKey;
+    const original = await listMarkdownToEdit(store, key);
+    const dir = await mkdtemp(join(tmpdir(), "todo-edit-"));
+    const file = join(dir, `${key}.md`);
+    let keep = false;
+    try {
+      await writeFile(file, original);
+      await context.openEditor(file);
+      const edited = await readFile(file, "utf8");
+      if (edited === original) {
+        return { text: `No changes to ${key}\n`, json: { list: key, items: [], removed: [] } };
+      }
+      try {
+        return imported(key, await importEditedList(store, key, original, edited));
+      } catch (error) {
+        if (!(error instanceof TodoError)) throw error;
+        keep = true;
+        throw new TodoError(error.code, `${error.message}; the edits are kept in ${file}`);
+      }
+    } finally {
+      if (!keep) await rm(dir, { recursive: true, force: true });
+    }
   });
 
 const exportMarkdown = (context: CommandContext, key: string) =>
@@ -441,10 +490,10 @@ const LIST_COMMANDS: readonly Command[] = [
   {
     name: "import",
     aliases: [],
-    usage: "<key> < TODO.md",
+    usage: "<key> [--remove-missing] < TODO.md",
     summary:
-      "Merge a Markdown task list from stdin into a List, creating it if missing. Lines with this List's Item IDs update those Items.",
-    options: [],
+      "Merge a Markdown task list from stdin into a List, creating it if missing. Lines with this List's Item IDs update those Items. --remove-missing removes the Items it leaves out.",
+    options: ["remove-missing"],
     run: context => importMarkdown(context, oneArg(context.args, "the list key")),
   },
   {

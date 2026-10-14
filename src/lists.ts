@@ -2,7 +2,7 @@ import { sql } from "kysely";
 
 import { TodoError } from "./errors.ts";
 import { type ItemFilter, filterItems, mergeIntoList } from "./items.ts";
-import { type RenderOptions, parseMarkdown, renderMarkdown } from "./markdown.ts";
+import { type ParsedList, type RenderOptions, parseMarkdown, renderMarkdown } from "./markdown.ts";
 import { duplicateKey, mergeDuplicate } from "./merge.ts";
 import {
   type ItemRow,
@@ -233,15 +233,95 @@ const cleanupList = (store: TodoStore, key: string): Promise<Item[]> =>
     return removed.map(item => toItem(item, row.key));
   });
 
+const renderRows = async (
+  context: StoreContext,
+  row: ListRow,
+  options: RenderOptions = {},
+): Promise<string> => {
+  const items = (await loadItemRows(context, row.id)).map(item => toItem(item, row.key));
+  return renderMarkdown(toList(row), items, options);
+};
+
 /** A List as Markdown, by Position, with Item IDs unless `ids` is false; works on Archived Lists too. */
 const exportList = async (
   store: TodoStore,
   key: string,
   options: RenderOptions = {},
-): Promise<string> => {
-  const row = await getListRow(store, parseListKey(key));
-  const items = (await loadItemRows(store, row.id)).map(item => toItem(item, row.key));
-  return renderMarkdown(toList(row), items, options);
+): Promise<string> => renderRows(store, await getListRow(store, parseListKey(key)), options);
+
+type ImportOptions = {
+  /**
+   * Make the List match the Markdown: remove the Items no line matches, and
+   * replace the List's description with the Markdown's.
+   */
+  removeMissing?: boolean;
+};
+
+/** The resulting Item for each line, and the Item IDs of the Items removed. */
+type ImportResult = { items: Item[]; removed: number[] };
+
+const importRows = async (
+  tx: StoreContext,
+  listKey: string,
+  parsed: ParsedList,
+  options: ImportOptions,
+): Promise<ImportResult> => {
+  const useIds = parsed.key === undefined || parsed.key === listKey;
+  if (options.removeMissing === true && !useIds) {
+    throw new TodoError(
+      "INVALID_INPUT",
+      `the Markdown is list '${parsed.key}', not '${listKey}'; removing missing Items would remove them all`,
+    );
+  }
+  let row = await ensureWritableListRow(tx, listKey);
+  const description =
+    options.removeMissing === true ? parsed.description : (row.description ?? parsed.description);
+  if (description !== (row.description ?? undefined)) {
+    row = await setListDescription(tx, row, description);
+  }
+  const now = tx.now();
+  const byNumber = new Map((await loadItemRows(tx, row.id)).map(item => [item.number, item]));
+  const results: ItemRow[] = [];
+  const updated: { index: number; row: ItemRow }[] = [];
+  const added: { index: number; draft: ItemDraft }[] = [];
+  for (const [index, { id, done, ...fields }] of parsed.items.entries()) {
+    const existing = useIds && id !== undefined ? byNumber.get(id) : undefined;
+    if (existing === undefined) {
+      added.push({ index, draft: { ...fields, doneAt: done ? now : undefined } });
+      continue;
+    }
+    const doneAt = done ? (existing.done_at ?? now) : undefined;
+    updated.push({ index, row: await updateItemRow(tx, existing, { ...fields, doneAt }) });
+  }
+
+  const slots = updated.map(item => item.row.position).toSorted((a, b) => a - b);
+  for (const [i, item] of updated.entries()) {
+    item.row = await setItemPosition(tx, item.row, slots[i]!);
+  }
+  const { survivorOf } = await mergeDuplicateRows(
+    tx,
+    await loadItemRows(tx, row.id),
+    new Set(updated.map(item => item.row.id)),
+  );
+  for (const item of updated) results[item.index] = survivorOf.get(item.row.id) ?? item.row;
+
+  const merged = await mergeIntoList(
+    tx,
+    row,
+    added.map(item => item.draft),
+  );
+  for (const [i, item] of added.entries()) results[item.index] = merged[i]!;
+
+  let removed: ItemRow[] = [];
+  if (options.removeMissing === true) {
+    const matched = new Set(results.map(item => item.id));
+    removed = (await loadItemRows(tx, row.id)).filter(item => !matched.has(item.id));
+    await deleteItemRows(tx, removed);
+  }
+  return {
+    items: results.map(item => toItem(item, row.key)),
+    removed: removed.map(item => item.number).toSorted((a, b) => a - b),
+  };
 };
 
 /**
@@ -252,54 +332,57 @@ const exportList = async (
  * line updates that Item, and the updated Items swap into the Positions they
  * held, in the Markdown's order; an update that makes Duplicate Items merges
  * them. Every other line merges into the List as a copy would, and new Items
- * go last. Import never removes an Item that the Markdown leaves out.
- * Returns the resulting Item for each line.
+ * go last.
+ *
+ * Import never removes an Item that the Markdown leaves out, unless
+ * `removeMissing` is set: then it removes every Item that no line updated or
+ * merged into, and the Markdown's description replaces the List's. With
+ * `removeMissing`, Markdown of another List is INVALID_INPUT.
  */
-const importList = (store: TodoStore, key: string, markdown: string): Promise<Item[]> =>
+const importList = (
+  store: TodoStore,
+  key: string,
+  markdown: string,
+  options: ImportOptions = {},
+): Promise<ImportResult> =>
+  inTransaction(store, async tx =>
+    importRows(tx, parseListKey(key), parseMarkdown(markdown), options),
+  );
+
+/** A List's Markdown to edit: its export, or `# key` if it doesn't exist. LIST_ARCHIVED if archived. */
+const listMarkdownToEdit = async (context: StoreContext, key: string): Promise<string> => {
+  const listKey = parseListKey(key);
+  if ((await findListRow(context, listKey)) === undefined) return `# ${listKey}\n`;
+  return renderRows(context, await getActiveListRow(context, listKey));
+};
+
+/**
+ * Imports a List's edited Markdown with `removeMissing`, if the List is still
+ * as it was when `original` was read from it; otherwise LIST_CHANGED. Edits
+ * that give a missing List no Items or description don't create it.
+ */
+const importEditedList = (
+  store: TodoStore,
+  key: string,
+  original: string,
+  edited: string,
+): Promise<ImportResult> =>
   inTransaction(store, async tx => {
-    const parsed = parseMarkdown(markdown);
     const listKey = parseListKey(key);
-    let row = await ensureWritableListRow(tx, listKey);
-    if (row.description === null && parsed.description !== undefined) {
-      row = await touchListRow(tx, row, { description: parsed.description });
+    if ((await listMarkdownToEdit(tx, listKey)) !== original) {
+      throw new TodoError("LIST_CHANGED", `list '${listKey}' changed while it was being edited`);
     }
-    const now = tx.now();
-    const useIds = parsed.key === undefined || parsed.key === listKey;
-    const byNumber = new Map((await loadItemRows(tx, row.id)).map(item => [item.number, item]));
-    const results: ItemRow[] = [];
-    const updated: { index: number; row: ItemRow }[] = [];
-    const added: { index: number; draft: ItemDraft }[] = [];
-    for (const [index, { id, done, ...fields }] of parsed.items.entries()) {
-      const existing = useIds && id !== undefined ? byNumber.get(id) : undefined;
-      if (existing === undefined) {
-        added.push({ index, draft: { ...fields, doneAt: done ? now : undefined } });
-        continue;
-      }
-      const doneAt = done ? (existing.done_at ?? now) : undefined;
-      updated.push({ index, row: await updateItemRow(tx, existing, { ...fields, doneAt }) });
+    const parsed = parseMarkdown(edited);
+    const missing = (await findListRow(tx, listKey)) === undefined;
+    if (missing && parsed.items.length === 0 && parsed.description === undefined) {
+      return { items: [], removed: [] };
     }
-
-    const slots = updated.map(item => item.row.position).toSorted((a, b) => a - b);
-    for (const [i, item] of updated.entries()) {
-      item.row = await setItemPosition(tx, item.row, slots[i]!);
-    }
-    const { survivorOf } = await mergeDuplicateRows(
-      tx,
-      await loadItemRows(tx, row.id),
-      new Set(updated.map(item => item.row.id)),
-    );
-    for (const item of updated) results[item.index] = survivorOf.get(item.row.id) ?? item.row;
-
-    const merged = await mergeIntoList(
-      tx,
-      row,
-      added.map(item => item.draft),
-    );
-    for (const [i, item] of added.entries()) results[item.index] = merged[i]!;
-    return results.map(item => toItem(item, row.key));
+    return importRows(tx, listKey, parsed, { removeMissing: true });
   });
 
 export {
+  type ImportOptions,
+  type ImportResult,
   archiveList,
   cleanupList,
   copyList,
@@ -307,8 +390,10 @@ export {
   editList,
   exportList,
   getListSummary,
+  importEditedList,
   importList,
   listLists,
+  listMarkdownToEdit,
   moveList,
   removeList,
   showList,

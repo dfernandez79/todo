@@ -9,6 +9,8 @@ const OPTION_HELP: Record<OptionName, string> = {
   sort: "--sort=<s>            Order inside each Section: position (default) or priority",
   move: "--move=<m>            Move the Item within its Section: up, down, top, bottom",
   "no-ids": "--no-ids              Leave the Item IDs out",
+  "remove-missing":
+    "--remove-missing      Remove the Items the Markdown leaves out, and take its description",
   description: "--description=<text>  The List's description",
   all: "--all, -a             Include Done Items",
   "all-items": "--all-items           Every pending Item of the List",

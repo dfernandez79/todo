@@ -1,14 +1,23 @@
 import { beforeEach, describe, expect, test } from "bun:test";
+import { readFile, stat, writeFile } from "node:fs/promises";
 
-import { type Todo, todoCli } from "../test-helpers/cli.ts";
+import { type FakeEditor, type Todo, todoCli } from "../test-helpers/cli.ts";
 import { DATABASES } from "../test-helpers/databases.ts";
 import type { Item, ListSummary } from "../types.ts";
 
 type Items = { list: string; items: Item[] };
 
+type Imported = Items & { removed: number[] };
+
 const ids = (result: { items: Item[] }) => result.items.map(item => item.id);
 
 const descriptions = (result: { items: Item[] }) => result.items.map(item => item.description);
+
+const exists = (file: string) =>
+  stat(file).then(
+    () => true,
+    () => false,
+  );
 
 const errorOf = async (todo: Todo, args: string[]) => {
   const result = await todo([...args, "--json"]);
@@ -666,8 +675,54 @@ describe.each(DATABASES)("todo on $name", database => {
       expect((await todo.json<ListSummary>(["list", "show-summary", "test-1"])).description).toBe(
         "Mine",
       );
-      const bad = await todo(["list", "import", "test-1", "--json"], "- [ ] One\n\nStray text\n");
+      const bad = await todo(["list", "import", "test-1", "--json"], "- [ ] `id:1` One `id:2`\n");
       expect(JSON.parse(bad.stdout).error.code).toBe("INVALID_INPUT");
+    });
+
+    test("import reports no removed Items without --remove-missing", async () => {
+      await todo(["add", "One", "--list=test-1"]);
+      const imported = await todo.json<Imported>(["list", "import", "test-1"], "- [ ] Two\n");
+      expect(imported.removed).toEqual([]);
+      expect((await todo(["import", "--list=test-1"], "- [ ] Three\n")).stdout).toBe(
+        "Imported 1 items into test-1, removed 0\n",
+      );
+    });
+
+    test("import --remove-missing removes the Items no line matches", async () => {
+      await todo(["list", "add", "test-1", "--description=Old"]);
+      for (const description of ["One", "Two", "Three"]) {
+        await todo(["add", description, "--list=test-1"]);
+      }
+      await todo(["add", "Four", "--list=test-1", "--section=UI"]);
+      const imported = await todo.json<Imported>(
+        ["list", "import", "test-1", "--remove-missing"],
+        "# test-1\n\nNew.\n\n- [ ] One again `id:1`\n- [ ] Three\n- [ ] Five\n",
+      );
+      expect(ids(imported)).toEqual([1, 3, 5]);
+      expect(imported.removed).toEqual([2, 4]);
+      expect(descriptions(await todo.json<Items>(["ls", "-a", "--list=test-1"]))).toEqual([
+        "One again",
+        "Three",
+        "Five",
+      ]);
+      expect((await todo.json<ListSummary>(["list", "show-summary", "test-1"])).description).toBe(
+        "New.",
+      );
+
+      await todo(["import", "--list=test-1", "--remove-missing"], "- [ ] Three\n");
+      const summary = await todo.json<ListSummary>(["list", "show-summary", "test-1"]);
+      expect(summary).toMatchObject({ pending: 1 });
+      expect(summary.description).toBeUndefined();
+    });
+
+    test("import --remove-missing rejects another List's Markdown", async () => {
+      await todo(["add", "Mine", "--list=test-2"]);
+      const theirs = await todo(
+        ["list", "import", "test-2", "--remove-missing", "--json"],
+        "# test-1\n\n- [ ] Theirs `id:1`\n",
+      );
+      expect(JSON.parse(theirs.stdout).error.code).toBe("INVALID_INPUT");
+      expect(descriptions(await todo.json<Items>(["ls", "--list=test-2"]))).toEqual(["Mine"]);
     });
 
     test("copies a List on top of another, creating it with the description", async () => {
@@ -708,6 +763,135 @@ describe.each(DATABASES)("todo on $name", database => {
       expect(await errorOf(todo, ["list", "show", "test-1"])).toMatchObject({
         code: "LIST_NOT_FOUND",
       });
+    });
+  });
+
+  describe("editing a List", () => {
+    let path: string;
+
+    beforeEach(async () => {
+      path = await database.fresh();
+      todo = todoCli(path);
+      await todo(["add", "One", "--priority=high"]);
+      await todo(["add", "Two", "--section=UI"]);
+      await todo(["add", "Three", "--section=UI"]);
+      await todo(["done", "3"]);
+    }, 30_000);
+
+    /** A `todo` whose editor replaces the file's text with `edit`'s, recording what it saw. */
+    const editing = (edit: (text: string) => string, env: Record<string, string> = {}) => {
+      const seen: { command?: string; file?: string; text?: string } = {};
+      const editor: FakeEditor = async (command, file) => {
+        Object.assign(seen, { command, file, text: await readFile(file, "utf8") });
+        await writeFile(file, edit(seen.text!));
+        return 0;
+      };
+      return { cli: todoCli(path, { EDITOR: "ed", ...env }, editor), seen };
+    };
+
+    test("opens the List's Markdown and imports the edits, removing deleted lines", async () => {
+      const { cli, seen } = editing(text =>
+        text
+          .replace("One (!high)", "One edited (!low)")
+          .replace("- [ ] Two `id:2`\n", "Stray text\n")
+          .concat("- [ ] Four\n"),
+      );
+      const result = await cli.json<Imported>(["edit"]);
+      expect(seen.command).toBe("ed");
+      expect(seen.text).toBe(
+        "# default\n\n- [ ] One (!high) `id:1`\n\n## UI\n\n- [ ] Two `id:2`\n- [x] Three `id:3`\n",
+      );
+      expect(result).toMatchObject({ list: "default", removed: [2] });
+      expect(ids(result)).toEqual([1, 3, 4]);
+      const listed = await todo.json<Items>(["ls", "-a"]);
+      expect(
+        listed.items.map(item => [item.id, item.description, item.priority, item.done]),
+      ).toEqual([
+        [1, "One edited", "low", false],
+        [3, "Three", undefined, true],
+        [4, "Four", undefined, false],
+      ]);
+      expect(await exists(seen.file!)).toBe(false);
+    });
+
+    test("prefers $VISUAL to $EDITOR, and fails without either", async () => {
+      const { cli, seen } = editing(text => text, { VISUAL: "vis" });
+      await cli(["edit"]);
+      expect(seen.command).toBe("vis");
+      const none = todoCli(path);
+      const result = await none(["edit"]);
+      expect(result.code).toBe(2);
+      expect(result.stderr).toStartWith("todo: set $VISUAL or $EDITOR to edit a List");
+    });
+
+    test("changes nothing when the file is saved unchanged", async () => {
+      const { cli, seen } = editing(text => text);
+      expect(await cli.json<Imported>(["edit"])).toEqual({
+        list: "default",
+        items: [],
+        removed: [],
+      });
+      expect((await cli(["edit"])).stdout).toBe("No changes to default\n");
+      expect(await exists(seen.file!)).toBe(false);
+    });
+
+    test("changes nothing when the editor fails", async () => {
+      const cli = todoCli(path, { EDITOR: "ed" }, async (_command, file) => {
+        await writeFile(file, "# default\n");
+        return 1;
+      });
+      expect(await errorOf(cli, ["edit"])).toMatchObject({ code: "EDITOR_FAILED", exit: 1 });
+      expect(ids(await todo.json<Items>(["ls", "-a"]))).toEqual([1, 2, 3]);
+    });
+
+    test("keeps the file of an invalid edit, changing nothing", async () => {
+      const { cli, seen } = editing(text => text.replace("`id:2`", "`id:1`"));
+      const error = await errorOf(cli, ["edit"]);
+      expect(error.code).toBe("INVALID_INPUT");
+      expect(error.message).toContain(seen.file!);
+      expect(await readFile(seen.file!, "utf8")).toContain("- [ ] Two `id:1`");
+      expect(ids(await todo.json<Items>(["ls", "-a"]))).toEqual([1, 2, 3]);
+    });
+
+    test("keeps the file when the List changed while the editor was open", async () => {
+      let file = "";
+      const cli = todoCli(path, { EDITOR: "ed" }, async (_command, opened) => {
+        file = opened;
+        await writeFile(opened, "# default\n\n- [ ] Only\n");
+        await todo(["add", "Added meanwhile"]);
+        return 0;
+      });
+      const error = await errorOf(cli, ["edit"]);
+      expect(error.code).toBe("LIST_CHANGED");
+      expect(error.message).toContain(file);
+      expect(descriptions(await todo.json<Items>(["ls"]))).toEqual([
+        "One",
+        "Added meanwhile",
+        "Two",
+      ]);
+    });
+
+    test("fails on an Archived List before opening the editor", async () => {
+      await todo(["add", "x", "--list=old"]);
+      await todo(["list", "archive", "old"]);
+      expect(await errorOf(todoCli(path, { EDITOR: "ed" }), ["edit", "--list=old"])).toMatchObject({
+        code: "LIST_ARCHIVED",
+      });
+    });
+
+    test("creates a missing List only if the edit adds to it", async () => {
+      const blank = editing(text => `${text}\n## Later\n\nJust a thought.\n`);
+      await blank.cli(["edit", "--list=new-1"]);
+      expect(blank.seen.text).toBe("# new-1\n");
+      expect(await errorOf(todo, ["list", "show", "new-1"])).toMatchObject({
+        code: "LIST_NOT_FOUND",
+      });
+      const added = editing(text => `${text}\n- [ ] First\n`);
+      expect(ids(await added.cli.json<Imported>(["edit", "--list=new-1"]))).toEqual([1]);
+    });
+
+    test("still needs an Item ID to take options", async () => {
+      expect((await todoCli(path, { EDITOR: "ed" })(["edit", "--priority=low"])).code).toBe(2);
     });
   });
 

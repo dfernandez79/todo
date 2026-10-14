@@ -21,6 +21,8 @@ type CliIo = {
   stderr: Output;
   /** All of stdin, for `todo list import`. */
   readStdin: () => Promise<string>;
+  /** Runs an editor command, such as `code --wait`, on a file, returning its exit code. */
+  runEditor: (command: string, file: string) => Promise<number>;
 };
 
 type CliSystem = {
@@ -110,6 +112,16 @@ const resolveColor = (values: OptionValues, env: CliSystem["env"], stdout: Outpu
   return stdout.isTTY === true;
 };
 
+/** Opens a file in `$VISUAL`, or else `$EDITOR`; EDITOR_FAILED if it exits with an error. */
+const openEditor = async (file: string, io: CliIo, env: CliSystem["env"]): Promise<void> => {
+  const command = nonEmpty(env.VISUAL) ?? nonEmpty(env.EDITOR);
+  if (command === undefined) throw new UsageError("set $VISUAL or $EDITOR to edit a List");
+  const code = await io.runEditor(command, file);
+  if (code !== 0) {
+    throw new TodoError("EDITOR_FAILED", `the editor '${command}' exited with code ${code}`);
+  }
+};
+
 const errorBody = (error: unknown): { code: string; message: string } => {
   if (error instanceof UsageError) return { code: "USAGE", message: error.message };
   if (error instanceof TodoError) return { code: error.code, message: error.message };
@@ -156,6 +168,7 @@ const runCli = async (argv: readonly string[], io: CliIo, system: CliSystem): Pr
         return store;
       },
       readStdin: io.readStdin,
+      openEditor: file => openEditor(file, io, system.env),
     });
     io.stdout.write(
       json && result.json !== undefined
