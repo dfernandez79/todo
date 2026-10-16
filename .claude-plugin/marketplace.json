@@ -1,0 +1,22 @@
+{
+  "name": "todo",
+  "owner": {
+    "name": "Diego Fernandez",
+    "url": "https://www.diegoux.com"
+  },
+  "description": "The todo plugin: track a project's to-do list with the todo CLI (@diegoux/todo).",
+  "plugins": [
+    {
+      "name": "todo",
+      "source": "./",
+      "description": "Track a project's to-do list with the todo CLI (@diegoux/todo).",
+      "author": {
+        "name": "Diego Fernandez",
+        "url": "https://www.diegoux.com"
+      },
+      "license": "MIT",
+      "strict": false,
+      "skills": ["./skill"]
+    }
+  ]
+}

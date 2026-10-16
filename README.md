@@ -30,6 +30,33 @@ npm install @diegoux/todo
 bun add @diegoux/todo
 ```
 
+## Claude Code plugin
+
+The repository is also a Claude Code plugin marketplace, with a skill that
+teaches the agent to track a project's to-do list using this CLI. Add the
+marketplace and install the plugin:
+
+```bash
+claude plugin marketplace add dfernandez79/todo
+claude plugin install todo@todo
+```
+
+In Claude Desktop, use **Customize > Plugins > Add marketplace** with
+`dfernandez79/todo`, then install `todo`.
+
+The plugin has no `version`, so the latest commit is the version. To get a newer
+one:
+
+```bash
+claude plugin marketplace update todo
+claude plugin update todo@todo
+```
+
+For local development, add the marketplace from a clone instead, so the plugin
+loads the skill in place: `claude plugin marketplace add ./` from the repository
+root. Edits to `skill/SKILL.md` take effect at the next session start, or with
+`/reload-plugins` in a running session.
+
 ## Usage
 
 ```bash
