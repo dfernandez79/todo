@@ -84,14 +84,17 @@ const compareLegacy = (a: PositionRow, b: PositionRow): number => {
 };
 
 // oxlint-disable-next-line typescript/no-explicit-any -- any database, as migrations take
-const migrate = async (db: Kysely<any>): Promise<void> => {
-  const migrator = new Migrator({
+const migrator = (db: Kysely<any>): Migrator =>
+  new Migrator({
     db,
     provider: { getMigrations: async () => MIGRATIONS },
     migrationTableName: "todo_migration",
     migrationLockTableName: "todo_migration_lock",
   });
-  const { error } = await migrator.migrateToLatest();
+
+// oxlint-disable-next-line typescript/no-explicit-any -- any database, as migrations take
+const migrate = async (db: Kysely<any>): Promise<void> => {
+  const { error } = await migrator(db).migrateToLatest();
   if (error !== undefined) {
     throw new Error(`database migration failed: ${(error as Error).message ?? String(error)}`, {
       cause: error,
@@ -99,4 +102,11 @@ const migrate = async (db: Kysely<any>): Promise<void> => {
   }
 };
 
-export { MIGRATIONS, migrate };
+/** The names of the migrations not yet run. Reads only; a database without the migration table has them all pending. */
+// oxlint-disable-next-line typescript/no-explicit-any -- any database, as migrations take
+const pendingMigrations = async (db: Kysely<any>): Promise<string[]> => {
+  const migrations = await migrator(db).getMigrations();
+  return migrations.filter(m => m.executedAt === undefined).map(m => m.name);
+};
+
+export { MIGRATIONS, migrate, pendingMigrations };

@@ -43,4 +43,18 @@ const postgresql: TestDatabase = {
 /** The databases every store test runs against. */
 const DATABASES: TestDatabase[] = NO_DATABASE ? [sqlite] : [sqlite, postgresql];
 
-export { DATABASES, NO_DATABASE, type TestDatabase, tempDir };
+/** The PostgreSQL container's name on the Docker network, which Neon's proxy connects to. */
+const NEON_PROXIED_HOST = "postgres";
+
+/**
+ * A fresh PostgreSQL database addressed through Neon's WebSocket proxy, for
+ * the Neon serverless driver. Only that driver, configured by the test preload,
+ * can reach it.
+ */
+const freshNeonDatabase = async (): Promise<string> => {
+  const url = new URL(await postgresql.fresh());
+  url.host = `${NEON_PROXIED_HOST}:5432`;
+  return url.toString();
+};
+
+export { DATABASES, NEON_PROXIED_HOST, NO_DATABASE, type TestDatabase, freshNeonDatabase, tempDir };

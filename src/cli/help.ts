@@ -25,6 +25,8 @@ const OPTION_HELP: Record<OptionName, string> = {
   db: "--db=<url|path>       A postgres:// URL or SQLite file (default: $TODO_DATABASE_URL, or ~/.todo/todo.db)",
   "db-timeout":
     "--db-timeout=<s>      Seconds to wait to connect to PostgreSQL (default: $TODO_DATABASE_TIMEOUT, or 30)",
+  "db-use-neon-serverless":
+    "--db-use-neon-serverless  Connect to PostgreSQL with the Neon serverless driver, over WebSockets (or set TODO_USE_NEON_SERVERLESS=1)",
   help: "--help, -h            Show help",
   version: "--version, -v         Show the version",
 };
@@ -35,6 +37,7 @@ const GLOBAL_OPTIONS: readonly OptionName[] = [
   "no-color",
   "db",
   "db-timeout",
+  "db-use-neon-serverless",
   "help",
 ];
 

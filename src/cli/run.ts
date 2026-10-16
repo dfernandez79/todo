@@ -2,7 +2,7 @@ import { join } from "node:path";
 
 import pkg from "../../package.json" with { type: "json" };
 import { TodoError, UsageError } from "../errors.ts";
-import { type TodoStore, todoListStore } from "../store.ts";
+import { type StoreOptions, type TodoStore, todoListStore } from "../store.ts";
 import { parseListKey } from "../types.ts";
 import { type Command, GROUPS, ITEM_COMMANDS, findCommand, itemsCommand } from "./commands.ts";
 import { GUIDE } from "./guide.ts";
@@ -109,6 +109,17 @@ const resolveConnectTimeout = (values: OptionValues, env: CliSystem["env"]): num
   return seconds;
 };
 
+/** Whether to use the Neon serverless driver: `--db-use-neon-serverless`, or `TODO_USE_NEON_SERVERLESS`. */
+const resolveUseNeonServerless = (values: OptionValues, env: CliSystem["env"]): boolean => {
+  if (values["db-use-neon-serverless"] === true) return true;
+  const text = (env.TODO_USE_NEON_SERVERLESS ?? "").trim().toLowerCase();
+  if (text === "1" || text === "true") return true;
+  if (text === "" || text === "0" || text === "false") return false;
+  throw new UsageError(
+    `TODO_USE_NEON_SERVERLESS must be 1 or 0, got '${env.TODO_USE_NEON_SERVERLESS}'`,
+  );
+};
+
 const resolveJson = (values: OptionValues, env: CliSystem["env"]): boolean => {
   const format = nonEmpty(env.TODO_FORMAT);
   if (format !== undefined && format !== "json" && format !== "text") {
@@ -176,8 +187,11 @@ const runCli = async (argv: readonly string[], io: CliIo, system: CliSystem): Pr
     const { command, prefix, args } = resolved;
     checkOptions(command, prefix, given);
     const database = resolveDatabase(values, system);
-    const connectTimeout = resolveConnectTimeout(values, system.env);
-    const autoMigrate = system.env.TODO_NO_AUTO_MIGRATE !== "1";
+    const storeOptions: StoreOptions = {
+      autoMigrate: system.env.TODO_NO_AUTO_MIGRATE !== "1",
+      connectTimeout: resolveConnectTimeout(values, system.env),
+      useNeonServerless: resolveUseNeonServerless(values, system.env),
+    };
     const usesList = command.options.includes("list");
     const result = await command.run({
       args,
@@ -186,8 +200,9 @@ const runCli = async (argv: readonly string[], io: CliIo, system: CliSystem): Pr
       listKey: usesList
         ? parseListKey(values.list ?? nonEmpty(system.env.TODO_LIST) ?? "default")
         : "default",
-      openStore: async () => {
-        store ??= await todoListStore(database, { autoMigrate, connectTimeout });
+      database,
+      openStore: async overrides => {
+        store ??= await todoListStore(database, { ...storeOptions, ...overrides });
         return store;
       },
       readStdin: io.readStdin,

@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { describeDatabase } from "../db/connect.ts";
 import { TodoError, UsageError } from "../errors.ts";
 import {
   type ItemChanges,
@@ -36,7 +37,7 @@ import {
   showList,
   unarchiveList,
 } from "../lists.ts";
-import { type TodoStore, migrateStore } from "../store.ts";
+import { type StoreOptions, type TodoStore, migrateStore, storeStatus } from "../store.ts";
 import { type Priority, parseItemMove, parseItemSort, parsePriority } from "../types.ts";
 import type { OptionName, OptionValues } from "./options.ts";
 import {
@@ -58,7 +59,10 @@ type CommandContext = {
   style: Style;
   /** The List Key from `--list`, `TODO_LIST`, or the default. */
   listKey: string;
-  openStore: () => Promise<TodoStore>;
+  /** The database from `--db`, `TODO_DATABASE_URL`, or the default. */
+  database: string;
+  /** Opens the database once; `overrides` count only on the first call. */
+  openStore: (overrides?: Pick<StoreOptions, "autoMigrate">) => Promise<TodoStore>;
   readStdin: () => Promise<string>;
   /** Opens a file in the user's editor, returning once they close it. */
   openEditor: (file: string) => Promise<void>;
@@ -563,6 +567,31 @@ const DB_COMMANDS: readonly Command[] = [
         await migrateStore(store);
         return { text: "Database is up to date.\n", json: { migrated: true } };
       }),
+  },
+  {
+    name: "ping",
+    aliases: [],
+    usage: "",
+    summary:
+      "Test the database connection: connect, then report the driver, the server version and the pending migrations, without running them.",
+    options: [],
+    run: async context => {
+      noArgs(context.args);
+      const started = Date.now();
+      const store = await context.openStore({ autoMigrate: false });
+      const connectMs = Date.now() - started;
+      const status = await storeStatus(store);
+      const database = describeDatabase(context.database);
+      const { pendingMigrations } = status;
+      const migrations =
+        pendingMigrations.length === 0
+          ? "up to date"
+          : `${pendingMigrations.length} pending (${pendingMigrations.join(", ")}); run 'todo db migrate'`;
+      return {
+        text: `Connected to ${database} in ${connectMs} ms\nDriver: ${status.driver}\nServer: ${status.server}\nMigrations: ${migrations}\n`,
+        json: { database, connectMs, ...status },
+      };
+    },
   },
 ];
 

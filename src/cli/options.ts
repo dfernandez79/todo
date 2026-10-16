@@ -23,6 +23,7 @@ const OPTIONS = {
   "no-color": { type: "boolean" },
   db: { type: "string" },
   "db-timeout": { type: "string" },
+  "db-use-neon-serverless": { type: "boolean" },
   help: { type: "boolean", short: "h" },
   version: { type: "boolean", short: "v" },
 } as const satisfies ParseArgsOptionsConfig;

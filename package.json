@@ -35,6 +35,7 @@
     "release": "bunx np"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.2.0",
     "kysely": "^0.29.6",
     "kysely-postgres-js": "^5.0.1",
     "postgres": "^3.4.9"
@@ -48,6 +49,7 @@
     "lint-staged": "^17.6.0",
     "oxfmt": "^0.72.0",
     "oxlint": "^1.87.0",
+    "testcontainers": "^12.2.0",
     "typescript": "^7"
   },
   "lint-staged": {

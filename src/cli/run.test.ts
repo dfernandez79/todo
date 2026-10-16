@@ -10,6 +10,14 @@ type Items = { list: string; items: Item[] };
 
 type Imported = Items & { removed: number[] };
 
+type Ping = {
+  database: string;
+  driver: string;
+  connectMs: number;
+  server: string;
+  pendingMigrations: string[];
+};
+
 const ids = (result: { items: Item[] }) => result.items.map(item => item.id);
 
 const descriptions = (result: { items: Item[] }) => result.items.map(item => item.description);
@@ -921,11 +929,33 @@ describe.each(DATABASES)("todo on $name", database => {
       expect((await bad(["guide"])).stdout).toStartWith("# Using todo from an agent");
     });
 
-    test("the guide explains how to raise the PostgreSQL connect timeout", async () => {
+    test("the guide explains how to test the connection and raise the PostgreSQL connect timeout", async () => {
       const { stdout } = await todo(["guide"]);
       expect(stdout).toContain("## Troubleshooting");
+      expect(stdout).toContain("todo db ping");
       expect(stdout).toContain("DB_CONNECT_TIMEOUT");
       expect(stdout).toContain("--db-timeout=<seconds>");
+      expect(stdout).toContain("--db-use-neon-serverless");
+    });
+
+    test("takes the Neon serverless driver from --db-use-neon-serverless or TODO_USE_NEON_SERVERLESS", async () => {
+      const path = await database.fresh();
+      if (database.name === "SQLite") {
+        // SQLite ignores the driver, as it does the timeout.
+        expect((await todoCli(path)(["add", "One", "--db-use-neon-serverless"])).code).toBe(0);
+        for (const on of ["1", "true"]) {
+          expect((await todoCli(path, { TODO_USE_NEON_SERVERLESS: on })(["ls"])).code).toBe(0);
+        }
+      }
+      for (const off of ["0", "false", ""]) {
+        expect((await todoCli(path, { TODO_USE_NEON_SERVERLESS: off })(["ls"])).code).toBe(0);
+      }
+      const bad = todoCli(path, { TODO_USE_NEON_SERVERLESS: "yes" });
+      expect(await errorOf(bad, ["ls"])).toEqual({
+        exit: 2,
+        code: "USAGE",
+        message: "TODO_USE_NEON_SERVERLESS must be 1 or 0, got 'yes'",
+      });
     });
 
     test("prints the version without touching the database", async () => {
@@ -959,6 +989,37 @@ describe.each(DATABASES)("todo on $name", database => {
       expect((await manual(["add", "One"])).code).toBe(1);
       expect((await manual(["db", "migrate"])).code).toBe(0);
       expect((await manual(["add", "One"])).code).toBe(0);
+    });
+
+    test("db ping tests the connection without migrating", async () => {
+      const path = await database.fresh();
+      const fresh = todoCli(path);
+      const server = database.name === "SQLite" ? /^SQLite \d+\.\d+/ : /^PostgreSQL \d+/;
+      const pending = await fresh.json<Ping>(["db", "ping"]);
+      expect(pending).toMatchObject({
+        driver: database.name === "SQLite" ? "sqlite" : "postgres",
+        pendingMigrations: ["0001_init", "0002_item_position"],
+      });
+      expect(pending.server).toMatch(server);
+      expect(pending.connectMs).toBeGreaterThanOrEqual(0);
+      if (database.name === "SQLite") expect(pending.database).toBe(path);
+      else expect(pending.database).toBe(path.replace(/:[^:@/]+@/, ":***@"));
+      expect((await fresh(["db", "ping"])).stdout).toMatch(
+        /^Connected to .+ in \d+ ms\nDriver: \w+\nServer: .+\nMigrations: 2 pending \(0001_init, 0002_item_position\); run 'todo db migrate'\n$/,
+      );
+      // It didn't migrate: the next command still has to.
+      expect((await todoCli(path, { TODO_NO_AUTO_MIGRATE: "1" })(["add", "One"])).code).toBe(1);
+      expect((await fresh(["add", "One"])).code).toBe(0);
+      expect((await fresh.json<Ping>(["db", "ping"])).pendingMigrations).toEqual([]);
+      expect((await fresh(["db", "ping"])).stdout).toContain("Migrations: up to date\n");
+      expect((await fresh(["db", "ping", "extra"])).code).toBe(2);
+    });
+
+    test("db ping reports a database it can't reach", async () => {
+      const bad = todoCli("postgres://nobody@127.0.0.1:1/none");
+      const { exit, code } = await errorOf(bad, ["db", "ping"]);
+      expect(exit).toBe(1);
+      expect(code).toBe("INTERNAL");
     });
   });
 });

@@ -107,6 +107,7 @@ Done Items, which `todo ls` hides, and doesn't change the Item's `updatedAt`.
 | `list export <key>`       | Print the List as a Markdown task list. `--no-ids` leaves the Item IDs out.  |
 | `list import <key>`       | Merge a Markdown task list from stdin. Takes `--remove-missing`.             |
 | `db migrate`              | Run database migrations. Needed only with `TODO_NO_AUTO_MIGRATE=1`.          |
+| `db ping`                 | Test the database connection: driver, server version, pending migrations.    |
 
 Run `todo <command> --help` for a command's options.
 
@@ -122,14 +123,15 @@ way:
 
 ## Configuration
 
-| Setting            | Flag                    | Environment variable          | Default           |
-| ------------------ | ----------------------- | ----------------------------- | ----------------- |
-| Database           | `--db`                  | `TODO_DATABASE_URL`           | `~/.todo/todo.db` |
-| PG connect timeout | `--db-timeout=<s>`      | `TODO_DATABASE_TIMEOUT`       | 30 seconds        |
-| Default list       | `--list`                | `TODO_LIST`                   | `default`         |
-| JSON output        | `--json`                | `TODO_FORMAT=json`            | text              |
-| Color              | `--color`, `--no-color` | `FORCE_COLOR=1`, `NO_COLOR=1` | on in a terminal  |
-| Migrations         |                         | `TODO_NO_AUTO_MIGRATE=1`      | run on start      |
+| Setting            | Flag                       | Environment variable          | Default           |
+| ------------------ | -------------------------- | ----------------------------- | ----------------- |
+| Database           | `--db`                     | `TODO_DATABASE_URL`           | `~/.todo/todo.db` |
+| PG connect timeout | `--db-timeout=<s>`         | `TODO_DATABASE_TIMEOUT`       | 30 seconds        |
+| Neon serverless    | `--db-use-neon-serverless` | `TODO_USE_NEON_SERVERLESS=1`  | off               |
+| Default list       | `--list`                   | `TODO_LIST`                   | `default`         |
+| JSON output        | `--json`                   | `TODO_FORMAT=json`            | text              |
+| Color              | `--color`, `--no-color`    | `FORCE_COLOR=1`, `NO_COLOR=1` | on in a terminal  |
+| Migrations         |                            | `TODO_NO_AUTO_MIGRATE=1`      | run on start      |
 
 A database value starting with `postgres://` or `postgresql://` indicates
 PostgreSQL; anything else is a SQLite file path. On PostgreSQL, the tables are
@@ -137,8 +139,17 @@ prefixed with `todo_` so they can share a database with other applications. The
 connection timeout is the seconds to wait to connect to PostgreSQL; SQLite
 ignores it.
 
+PostgreSQL is reached with [postgres.js](https://github.com/porsager/postgres)
+over TCP by default. `--db-use-neon-serverless` or `TODO_USE_NEON_SERVERLESS=1`
+switches to the
+[Neon serverless driver](https://github.com/neondatabase/serverless), which
+carries the connection over a WebSocket on port 443. Use it for a
+[Neon](https://neon.com) database from a sandbox that lets only HTTPS out, such
+as a cloud coding agent. SQLite ignores it.
+
 To set up an agent's environment, such as Claude Code on the web, export
-`TODO_DATABASE_URL`, `TODO_LIST` and `TODO_FORMAT=json` once.
+`TODO_DATABASE_URL`, `TODO_LIST` and `TODO_FORMAT=json` once, and check it with
+`todo db ping`.
 
 ## Output
 

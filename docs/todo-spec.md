@@ -16,10 +16,15 @@ in [docs/adr](./adr).
 - Package name `@diegoux/todo`, bin `todo`.
 - It supports PostgreSQL or SQLite as the database backend, through Kysely
   ([ADR 0001](./adr/0001-kysely-with-node-sqlite-adapter.md)):
-  - PostgreSQL via `kysely-postgres-js` on the `postgres` driver.
+  - PostgreSQL via `kysely-postgres-js` on the `postgres` driver, or with
+    `--db-use-neon-serverless` via Kysely's `PostgresDialect` on the
+    `@neondatabase/serverless` driver's `Pool`, over WebSockets
+    ([ADR 0002](./adr/0002-neon-serverless-driver-over-websockets.md)).
   - SQLite via `node:sqlite` on both Bun and Node, through our own small Kysely
     dialect adapter. The CLI suppresses the `node:sqlite` `ExperimentalWarning`.
 - PostgreSQL tests use testcontainers and are skipped with `SKIP_DB_TESTS=1`.
+  The Neon serverless driver is tested through Neon's `wsproxy` container in
+  front of the PostgreSQL one.
 
 # Concepts
 
@@ -71,21 +76,26 @@ in [docs/adr](./adr).
 
 ## Configuration
 
-| Setting            | Flag                    | Environment variable                 | Default           |
-| ------------------ | ----------------------- | ------------------------------------ | ----------------- |
-| Database           | `--db`                  | `TODO_DATABASE_URL`                  | `~/.todo/todo.db` |
-| PG connect timeout | `--db-timeout=<s>`      | `TODO_DATABASE_TIMEOUT`              | 30 seconds        |
-| Default list       | `--list`                | `TODO_LIST`                          | `default`         |
-| Output format      | `--json`                | `TODO_FORMAT=json`                   | text              |
-| Color              | `--color`, `--no-color` | `FORCE_COLOR=1`, `NO_COLOR=1`        | on in a terminal  |
-| Auto-migrate       |                         | `TODO_NO_AUTO_MIGRATE=1` disables it | enabled           |
-| Editor             |                         | `VISUAL`, then `EDITOR`              | none: an error    |
+| Setting            | Flag                       | Environment variable                 | Default           |
+| ------------------ | -------------------------- | ------------------------------------ | ----------------- |
+| Database           | `--db`                     | `TODO_DATABASE_URL`                  | `~/.todo/todo.db` |
+| PG connect timeout | `--db-timeout=<s>`         | `TODO_DATABASE_TIMEOUT`              | 30 seconds        |
+| Neon serverless    | `--db-use-neon-serverless` | `TODO_USE_NEON_SERVERLESS=1`         | off               |
+| Default list       | `--list`                   | `TODO_LIST`                          | `default`         |
+| Output format      | `--json`                   | `TODO_FORMAT=json`                   | text              |
+| Color              | `--color`, `--no-color`    | `FORCE_COLOR=1`, `NO_COLOR=1`        | on in a terminal  |
+| Auto-migrate       |                            | `TODO_NO_AUTO_MIGRATE=1` disables it | enabled           |
+| Editor             |                            | `VISUAL`, then `EDITOR`              | none: an error    |
 
 - A flag wins over the environment variable, which wins over the default.
 - A database value starting with `postgres://` (or `postgresql://`) selects
   PostgreSQL. Any other value is a SQLite file path.
 - The connection timeout is a positive number of seconds to wait to connect to
   PostgreSQL. SQLite ignores it.
+- `--db-use-neon-serverless`, or `TODO_USE_NEON_SERVERLESS` set to `1` or `true`
+  (`0`, `false` or empty is off; anything else is a usage error), connects to
+  PostgreSQL with the Neon serverless driver over a WebSocket instead of
+  postgres.js over TCP, for networks that let only HTTPS out. SQLite ignores it.
 - Environment variables allow setting up the environment for Claude Cloud.
 
 ## Output
@@ -149,6 +159,14 @@ Item with priority High.
 Migrations run automatically every time the CLI starts or the API opens a store.
 Set `TODO_NO_AUTO_MIGRATE=1` to disable this and run `todo db migrate`
 explicitly.
+
+`todo db ping` tests the connection: it opens the database without migrating,
+then prints the database (a PostgreSQL password shows as `***`), the driver
+(`sqlite`, `postgres` or `neon-serverless`), how long connecting took, the
+server version, and the names of the pending migrations. In JSON it prints
+`{"database", "driver", "connectMs", "server", "pendingMigrations": [...]}`. A
+connection that fails reports the same errors as any other command, so
+`todo guide` points to it for troubleshooting.
 
 # CLI behavior
 
@@ -374,6 +392,9 @@ todo list mv test-1 test-2
 
 # Run database migrations explicitly
 todo db migrate
+
+# Test the database connection
+todo db ping
 ```
 
 ### List copy behavior
@@ -498,6 +519,7 @@ the same functionality available in the CLI.
 import { addItem, importList, todoList, todoListStore } from "@diegoux/todo";
 
 // a postgres:// URL or a SQLite file path; runs pending migrations
+// (`{ useNeonServerless: true }` picks the Neon serverless driver for PostgreSQL)
 const store = await todoListStore("/path/to/todo.db");
 try {
   // a list by key; it's created on the first write

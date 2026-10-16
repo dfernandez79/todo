@@ -13,13 +13,20 @@ order the user keeps for the List.
 | ------------------ | -------------- | ----------------------- | ----------------- |
 | Database           | \`--db\`         | \`TODO_DATABASE_URL\`     | \`~/.todo/todo.db\` |
 | PG connect timeout | \`--db-timeout\` | \`TODO_DATABASE_TIMEOUT\` | 30 seconds        |
+| Neon serverless    | \`--db-use-neon-serverless\` | \`TODO_USE_NEON_SERVERLESS=1\` | off      |
 | Default list       | \`--list\`       | \`TODO_LIST\`             | \`default\`         |
 | JSON output        | \`--json\`       | \`TODO_FORMAT=json\`      | text              |
 | Color              | \`--no-color\`   | \`NO_COLOR=1\`            | on in a terminal  |
 
 A database starting with \`postgres://\` is PostgreSQL; anything else is a
-SQLite file. Set \`TODO_LIST\` and \`TODO_FORMAT=json\` once instead of passing
-the flags on every call.
+SQLite file. With \`--db-use-neon-serverless\` or \`TODO_USE_NEON_SERVERLESS=1\`,
+PostgreSQL is reached through the Neon serverless driver, over a WebSocket
+instead of a TCP connection on port 5432: use it for a Neon database when the
+network lets only HTTPS out, as a sandbox often does. Set \`TODO_LIST\` and
+\`TODO_FORMAT=json\` once instead of passing the flags on every call.
+
+Check the setup with \`todo db ping\`: it connects, then prints the driver, the
+server version and the pending migrations, without running them.
 
 ## Workflow
 
@@ -62,6 +69,8 @@ deletes. Copying or moving an Item to another List gives it a new ID there.
   the List from \`--list\` or \`TODO_LIST\`.
 - \`todo edit\` with no Item ID opens the List in \`$VISUAL\` or \`$EDITOR\` for a
   person. Agents should use the commands above instead.
+- \`todo db ping\`: test the database connection. \`todo db migrate\`: run the
+  pending migrations, needed only with \`TODO_NO_AUTO_MIGRATE=1\`.
 
 Run \`todo <command> --help\` for details.
 
@@ -88,13 +97,30 @@ Run \`todo <command> --help\` for details.
 
 ## Troubleshooting
 
+Start with \`todo db ping\` (or \`todo db ping --json\`). It uses the same
+\`--db\`, \`--db-timeout\` and driver settings as every other command, so it
+fails the way they do, and when it connects it shows which database and driver
+todo resolved, how long connecting took, the server version, and whether
+migrations are pending.
+
 - \`could not connect to the database within 30 seconds\` (exit 1, JSON code
   \`DB_CONNECT_TIMEOUT\`): todo gave up connecting to PostgreSQL after the connect
   timeout, 30 seconds by default.
   A slow network or a database that wakes on demand may need longer: pass
   \`--db-timeout=<seconds>\` or set \`TODO_DATABASE_TIMEOUT\`, for example
-  \`todo ls --db-timeout=90\`. If it still fails, check that the database URL
-  is reachable from where todo runs.
+  \`todo db ping --db-timeout=90\`. If it still fails, check that the database
+  URL is reachable from where todo runs.
+- The connection hangs or is refused (\`ECONNREFUSED\`, \`ETIMEDOUT\`, JSON code
+  \`INTERNAL\`) while the URL is right: the network may allow only HTTPS out.
+  For a Neon database, retry with \`--db-use-neon-serverless\` (or
+  \`TODO_USE_NEON_SERVERLESS=1\`), which connects over a WebSocket on port 443.
+- \`could not open a WebSocket to <host> for the Neon serverless driver\`: the
+  Neon driver is on, but the host isn't a Neon database or isn't reachable over
+  HTTPS. Check the URL, or turn the driver off for a plain PostgreSQL.
+- \`db ping\` reports pending migrations: run \`todo db migrate\`, or unset
+  \`TODO_NO_AUTO_MIGRATE\` so commands migrate on start.
+- \`db ping\` shows an unexpected database: \`--db\` wins over
+  \`TODO_DATABASE_URL\`, which wins over the default \`~/.todo/todo.db\`.
 
 ## JSON output
 

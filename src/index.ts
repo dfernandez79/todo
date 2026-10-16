@@ -34,7 +34,15 @@ export {
   showList,
   unarchiveList,
 } from "./lists.ts";
-export { type StoreOptions, type TodoStore, migrateStore, todoListStore } from "./store.ts";
+export { type Driver } from "./db/connect.ts";
+export {
+  type StoreOptions,
+  type StoreStatus,
+  type TodoStore,
+  migrateStore,
+  storeStatus,
+  todoListStore,
+} from "./store.ts";
 export {
   ITEM_MOVES,
   ITEM_SORTS,
