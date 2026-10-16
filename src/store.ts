@@ -22,6 +22,8 @@ type StoreContext = Pick<TodoStore, "db" | "now" | "newId">;
 type StoreOptions = {
   /** Run pending migrations on open. Defaults to true. */
   autoMigrate?: boolean;
+  /** Seconds to wait to connect to PostgreSQL. Defaults to 30. SQLite ignores it. */
+  connectTimeout?: number;
   now?: () => Date;
 };
 
@@ -30,7 +32,7 @@ type StoreOptions = {
  * SQLite file path.
  */
 const todoListStore = async (database: string, options: StoreOptions = {}): Promise<TodoStore> => {
-  const db = await connect(database);
+  const db = await connect(database, options.connectTimeout);
   try {
     if (options.autoMigrate ?? true) await migrate(db);
   } catch (error) {

@@ -22,7 +22,7 @@
   },
   "scripts": {
     "start": "bun run src/todo.ts",
-    "build": "bunup",
+    "build": "bunup && chmod +x dist/todo.js",
     "test": "bun test",
     "test:unit": "SKIP_DB_TESTS=1 bun test",
     "typecheck": "tsc --noEmit",

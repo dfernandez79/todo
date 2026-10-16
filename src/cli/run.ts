@@ -91,6 +91,23 @@ const resolveDatabase = (values: OptionValues, system: CliSystem): string => {
   return database.startsWith("~/") ? join(system.homedir, database.slice(2)) : database;
 };
 
+/**
+ * The PostgreSQL connection timeout in seconds, from `--db-timeout`,
+ * then `TODO_DATABASE_TIMEOUT`, or undefined for the default.
+ */
+const resolveConnectTimeout = (values: OptionValues, env: CliSystem["env"]): number | undefined => {
+  const [source, text] =
+    values["db-timeout"] === undefined
+      ? ["TODO_DATABASE_TIMEOUT", nonEmpty(env.TODO_DATABASE_TIMEOUT)]
+      : ["--db-timeout", values["db-timeout"]];
+  if (text === undefined) return undefined;
+  const seconds = Number(text);
+  if (text.trim() === "" || !Number.isFinite(seconds) || seconds <= 0) {
+    throw new UsageError(`${source} must be a positive number of seconds, got '${text}'`);
+  }
+  return seconds;
+};
+
 const resolveJson = (values: OptionValues, env: CliSystem["env"]): boolean => {
   const format = nonEmpty(env.TODO_FORMAT);
   if (format !== undefined && format !== "json" && format !== "text") {
@@ -154,6 +171,7 @@ const runCli = async (argv: readonly string[], io: CliIo, system: CliSystem): Pr
     const { command, prefix, args } = resolved;
     checkOptions(command, prefix, given);
     const database = resolveDatabase(values, system);
+    const connectTimeout = resolveConnectTimeout(values, system.env);
     const autoMigrate = system.env.TODO_NO_AUTO_MIGRATE !== "1";
     const usesList = command.options.includes("list");
     const result = await command.run({
@@ -164,7 +182,7 @@ const runCli = async (argv: readonly string[], io: CliIo, system: CliSystem): Pr
         ? parseListKey(values.list ?? nonEmpty(system.env.TODO_LIST) ?? "default")
         : "default",
       openStore: async () => {
-        store ??= await todoListStore(database, { autoMigrate });
+        store ??= await todoListStore(database, { autoMigrate, connectTimeout });
         return store;
       },
       readStdin: io.readStdin,

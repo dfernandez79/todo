@@ -71,18 +71,21 @@ in [docs/adr](./adr).
 
 ## Configuration
 
-| Setting       | Flag                    | Environment variable                 | Default           |
-| ------------- | ----------------------- | ------------------------------------ | ----------------- |
-| Database      | `--db`                  | `TODO_DATABASE_URL`                  | `~/.todo/todo.db` |
-| Default list  | `--list`                | `TODO_LIST`                          | `default`         |
-| Output format | `--json`                | `TODO_FORMAT=json`                   | text              |
-| Color         | `--color`, `--no-color` | `FORCE_COLOR=1`, `NO_COLOR=1`        | on in a terminal  |
-| Auto-migrate  |                         | `TODO_NO_AUTO_MIGRATE=1` disables it | enabled           |
-| Editor        |                         | `VISUAL`, then `EDITOR`              | none: an error    |
+| Setting            | Flag                    | Environment variable                 | Default           |
+| ------------------ | ----------------------- | ------------------------------------ | ----------------- |
+| Database           | `--db`                  | `TODO_DATABASE_URL`                  | `~/.todo/todo.db` |
+| PG connect timeout | `--db-timeout=<s>`      | `TODO_DATABASE_TIMEOUT`              | 30 seconds        |
+| Default list       | `--list`                | `TODO_LIST`                          | `default`         |
+| Output format      | `--json`                | `TODO_FORMAT=json`                   | text              |
+| Color              | `--color`, `--no-color` | `FORCE_COLOR=1`, `NO_COLOR=1`        | on in a terminal  |
+| Auto-migrate       |                         | `TODO_NO_AUTO_MIGRATE=1` disables it | enabled           |
+| Editor             |                         | `VISUAL`, then `EDITOR`              | none: an error    |
 
 - A flag wins over the environment variable, which wins over the default.
 - A database value starting with `postgres://` (or `postgresql://`) selects
   PostgreSQL. Any other value is a SQLite file path.
+- The connection timeout is a positive number of seconds to wait to connect to
+  PostgreSQL. SQLite ignores it.
 - Environment variables allow setting up the environment for Claude Cloud.
 
 ## Output

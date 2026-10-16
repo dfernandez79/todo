@@ -9,12 +9,13 @@ order the user keeps for the List.
 
 ## Setup
 
-| Setting      | Flag         | Environment variable       | Default            |
-| ------------ | ------------ | -------------------------- | ------------------ |
-| Database     | \`--db\`       | \`TODO_DATABASE_URL\`        | \`~/.todo/todo.db\`  |
-| Default list | \`--list\`     | \`TODO_LIST\`                | \`default\`          |
-| JSON output  | \`--json\`     | \`TODO_FORMAT=json\`         | text               |
-| Color        | \`--no-color\` | \`NO_COLOR=1\`               | on in a terminal   |
+| Setting            | Flag           | Environment variable    | Default           |
+| ------------------ | -------------- | ----------------------- | ----------------- |
+| Database           | \`--db\`         | \`TODO_DATABASE_URL\`     | \`~/.todo/todo.db\` |
+| PG connect timeout | \`--db-timeout\` | \`TODO_DATABASE_TIMEOUT\` | 30 seconds        |
+| Default list       | \`--list\`       | \`TODO_LIST\`             | \`default\`         |
+| JSON output        | \`--json\`       | \`TODO_FORMAT=json\`      | text              |
+| Color              | \`--no-color\`   | \`NO_COLOR=1\`            | on in a terminal  |
 
 A database starting with \`postgres://\` is PostgreSQL; anything else is a
 SQLite file. Set \`TODO_LIST\` and \`TODO_FORMAT=json\` once instead of passing

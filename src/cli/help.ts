@@ -23,10 +23,19 @@ const OPTION_HELP: Record<OptionName, string> = {
     "--color               Color the output even when it isn't a terminal (or set FORCE_COLOR=1)",
   "no-color": "--no-color            Don't color the output (or set NO_COLOR=1)",
   db: "--db=<url|path>       A postgres:// URL or SQLite file (default: $TODO_DATABASE_URL, or ~/.todo/todo.db)",
+  "db-timeout":
+    "--db-timeout=<s>      Seconds to wait to connect to PostgreSQL (default: $TODO_DATABASE_TIMEOUT, or 30)",
   help: "--help, -h            Show help",
 };
 
-const GLOBAL_OPTIONS: readonly OptionName[] = ["json", "color", "no-color", "db", "help"];
+const GLOBAL_OPTIONS: readonly OptionName[] = [
+  "json",
+  "color",
+  "no-color",
+  "db",
+  "db-timeout",
+  "help",
+];
 
 const commandLines = (prefix: string, commands: readonly Command[]): string[] => {
   const names = commands.map(command =>

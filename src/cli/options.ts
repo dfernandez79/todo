@@ -22,6 +22,7 @@ const OPTIONS = {
   color: { type: "boolean" },
   "no-color": { type: "boolean" },
   db: { type: "string" },
+  "db-timeout": { type: "string" },
   help: { type: "boolean", short: "h" },
 } as const satisfies ParseArgsOptionsConfig;
 

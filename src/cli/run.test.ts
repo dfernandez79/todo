@@ -926,11 +926,33 @@ describe.each(DATABASES)("todo on $name", database => {
       expect((await todoCli(await database.fresh(), { TODO_FORMAT: "yaml" })(["ls"])).code).toBe(2);
     });
 
+    test("takes the PostgreSQL connection timeout from --db-timeout or TODO_DATABASE_TIMEOUT", async () => {
+      const path = await database.fresh();
+      expect((await todoCli(path)(["add", "One", "--db-timeout=2.5"])).code).toBe(0);
+      const env = todoCli(path, { TODO_DATABASE_TIMEOUT: "10" });
+      expect((await env(["ls"])).code).toBe(0);
+      for (const bad of ["0", "-1", "soon", ""]) {
+        expect((await todoCli(path)(["ls", `--db-timeout=${bad}`])).code).toBe(2);
+        const badEnv = todoCli(path, { TODO_DATABASE_TIMEOUT: bad || " " });
+        expect((await badEnv(["ls"])).code).toBe(2);
+      }
+    });
+
     test("migrates on demand with TODO_NO_AUTO_MIGRATE", async () => {
       const manual = todoCli(await database.fresh(), { TODO_NO_AUTO_MIGRATE: "1" });
       expect((await manual(["add", "One"])).code).toBe(1);
       expect((await manual(["db", "migrate"])).code).toBe(0);
       expect((await manual(["add", "One"])).code).toBe(0);
     });
+  });
+});
+
+describe("the PostgreSQL connection timeout", () => {
+  test("is how long a command waits to connect", async () => {
+    // A non-routable address, where connecting hangs instead of failing.
+    const unreachable = todoCli("postgres://nobody@10.255.255.1:5432/none");
+    const started = Date.now();
+    expect((await unreachable(["ls", "--db-timeout=0.3"])).code).toBe(1);
+    expect(Date.now() - started).toBeLessThan(5000);
   });
 });

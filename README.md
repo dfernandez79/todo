@@ -122,17 +122,20 @@ way:
 
 ## Configuration
 
-| Setting      | Flag                    | Environment variable          | Default           |
-| ------------ | ----------------------- | ----------------------------- | ----------------- |
-| Database     | `--db`                  | `TODO_DATABASE_URL`           | `~/.todo/todo.db` |
-| Default list | `--list`                | `TODO_LIST`                   | `default`         |
-| JSON output  | `--json`                | `TODO_FORMAT=json`            | text              |
-| Color        | `--color`, `--no-color` | `FORCE_COLOR=1`, `NO_COLOR=1` | on in a terminal  |
-| Migrations   |                         | `TODO_NO_AUTO_MIGRATE=1`      | run on start      |
+| Setting            | Flag                    | Environment variable          | Default           |
+| ------------------ | ----------------------- | ----------------------------- | ----------------- |
+| Database           | `--db`                  | `TODO_DATABASE_URL`           | `~/.todo/todo.db` |
+| PG connect timeout | `--db-timeout=<s>`      | `TODO_DATABASE_TIMEOUT`       | 30 seconds        |
+| Default list       | `--list`                | `TODO_LIST`                   | `default`         |
+| JSON output        | `--json`                | `TODO_FORMAT=json`            | text              |
+| Color              | `--color`, `--no-color` | `FORCE_COLOR=1`, `NO_COLOR=1` | on in a terminal  |
+| Migrations         |                         | `TODO_NO_AUTO_MIGRATE=1`      | run on start      |
 
 A database value starting with `postgres://` or `postgresql://` indicates
 PostgreSQL; anything else is a SQLite file path. On PostgreSQL, the tables are
-prefixed with `todo_` so they can share a database with other applications.
+prefixed with `todo_` so they can share a database with other applications. The
+connection timeout is the seconds to wait to connect to PostgreSQL; SQLite
+ignores it.
 
 To set up an agent's environment, such as Claude Code on the web, export
 `TODO_DATABASE_URL`, `TODO_LIST` and `TODO_FORMAT=json` once.
