@@ -102,7 +102,9 @@ in [docs/adr](./adr).
   - JSON, `todo prompt`, `todo export`, `todo list export`, `todo guide`, and
     `--help` are never in color.
 - Errors exit with a non-zero code. In JSON mode they print
-  `{"error": {"code": "...", "message": "..."}}`.
+  `{"error": {"code": "...", "message": "..."}}`. Giving up on connecting to
+  PostgreSQL after `--db-timeout` is `DB_CONNECT_TIMEOUT`; the message tells how
+  to raise the timeout.
 
 ## Display order
 

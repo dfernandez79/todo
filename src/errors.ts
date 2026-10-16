@@ -7,6 +7,7 @@ const TODO_ERROR_CODES = [
   "INVALID_INPUT",
   "LIST_CHANGED",
   "EDITOR_FAILED",
+  "DB_CONNECT_TIMEOUT",
 ] as const;
 
 type TodoErrorCode = (typeof TODO_ERROR_CODES)[number];
@@ -15,8 +16,8 @@ type TodoErrorCode = (typeof TODO_ERROR_CODES)[number];
 class TodoError extends Error {
   readonly code: TodoErrorCode;
 
-  constructor(code: TodoErrorCode, message: string) {
-    super(message);
+  constructor(code: TodoErrorCode, message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = "TodoError";
     this.code = code;
   }

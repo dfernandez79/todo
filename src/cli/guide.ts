@@ -86,6 +86,16 @@ Run \`todo <command> --help\` for details.
   leaves out and takes the file's description. Text that isn't an Item is
   ignored.
 
+## Troubleshooting
+
+- \`could not connect to the database within 30 seconds\` (exit 1, JSON code
+  \`DB_CONNECT_TIMEOUT\`): todo gave up connecting to PostgreSQL after the connect
+  timeout, 30 seconds by default.
+  A slow network or a database that wakes on demand may need longer: pass
+  \`--db-timeout=<seconds>\` or set \`TODO_DATABASE_TIMEOUT\`, for example
+  \`todo ls --db-timeout=90\`. If it still fails, check that the database URL
+  is reachable from where todo runs.
+
 ## JSON output
 
 With \`--json\` or \`TODO_FORMAT=json\`, commands print one JSON value:
@@ -111,7 +121,7 @@ Errors exit non-zero (2 for a bad invocation, 1 otherwise). In JSON mode they
 print \`{"error": {"code": "...", "message": "..."}}\` on stdout. Codes:
 \`USAGE\`, \`LIST_NOT_FOUND\`, \`LIST_EXISTS\`, \`LIST_ARCHIVED\`, \`LIST_NOT_EMPTY\`,
 \`ITEM_NOT_FOUND\`, \`INVALID_INPUT\`, \`LIST_CHANGED\`, \`EDITOR_FAILED\`,
-\`INTERNAL\`.
+\`DB_CONNECT_TIMEOUT\`, \`INTERNAL\`.
 `;
 
 export { GUIDE };

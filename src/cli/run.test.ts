@@ -921,6 +921,13 @@ describe.each(DATABASES)("todo on $name", database => {
       expect((await bad(["guide"])).stdout).toStartWith("# Using todo from an agent");
     });
 
+    test("the guide explains how to raise the PostgreSQL connect timeout", async () => {
+      const { stdout } = await todo(["guide"]);
+      expect(stdout).toContain("## Troubleshooting");
+      expect(stdout).toContain("DB_CONNECT_TIMEOUT");
+      expect(stdout).toContain("--db-timeout=<seconds>");
+    });
+
     test("prints the version without touching the database", async () => {
       const bad = todoCli("postgres://nobody@127.0.0.1:1/none");
       const expected = { code: 0, stdout: `todo ${pkg.version}\n`, stderr: "" };
@@ -957,11 +964,19 @@ describe.each(DATABASES)("todo on $name", database => {
 });
 
 describe("the PostgreSQL connection timeout", () => {
-  test("is how long a command waits to connect", async () => {
+  test("is how long a command waits to connect, failing with DB_CONNECT_TIMEOUT", async () => {
     // A non-routable address, where connecting hangs instead of failing.
     const unreachable = todoCli("postgres://nobody@10.255.255.1:5432/none");
     const started = Date.now();
-    expect((await unreachable(["ls", "--db-timeout=0.3"])).code).toBe(1);
+    const { code, stdout } = await unreachable(["ls", "--json", "--db-timeout=0.3"]);
     expect(Date.now() - started).toBeLessThan(5000);
+    expect(code).toBe(1);
+    expect(JSON.parse(stdout)).toEqual({
+      error: {
+        code: "DB_CONNECT_TIMEOUT",
+        message:
+          "could not connect to the database within 0.3 seconds; raise it with --db-timeout or TODO_DATABASE_TIMEOUT",
+      },
+    });
   });
 });
