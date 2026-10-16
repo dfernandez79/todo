@@ -1,6 +1,6 @@
 {
   "name": "@diegoux/todo",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "A to-do list CLI for coding agents, stored in SQLite or PostgreSQL.",
   "license": "MIT",
   "author": "Diego Fernandez",
