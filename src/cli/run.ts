@@ -1,5 +1,6 @@
 import { join } from "node:path";
 
+import pkg from "../../package.json" with { type: "json" };
 import { TodoError, UsageError } from "../errors.ts";
 import { type TodoStore, todoListStore } from "../store.ts";
 import { parseListKey } from "../types.ts";
@@ -163,6 +164,10 @@ const runCli = async (argv: readonly string[], io: CliIo, system: CliSystem): Pr
   try {
     const { positionals, values, given } = parseArgv(argv);
     json = resolveJson(values, system.env);
+    if (values.version === true) {
+      io.stdout.write(`todo ${pkg.version}\n`);
+      return 0;
+    }
     const resolved = resolveCommand(positionals, values.help === true);
     if (resolved.kind === "text") {
       io.stdout.write(resolved.text);

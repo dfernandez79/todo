@@ -24,6 +24,7 @@ const OPTIONS = {
   db: { type: "string" },
   "db-timeout": { type: "string" },
   help: { type: "boolean", short: "h" },
+  version: { type: "boolean", short: "v" },
 } as const satisfies ParseArgsOptionsConfig;
 
 type OptionName = keyof typeof OPTIONS;

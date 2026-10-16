@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { readFile, stat, writeFile } from "node:fs/promises";
 
+import pkg from "../../package.json" with { type: "json" };
 import { type FakeEditor, type Todo, todoCli } from "../test-helpers/cli.ts";
 import { DATABASES } from "../test-helpers/databases.ts";
 import type { Item, ListSummary } from "../types.ts";
@@ -918,6 +919,14 @@ describe.each(DATABASES)("todo on $name", database => {
       );
       expect((await bad(["list"])).stdout).toStartWith("Usage: todo list <command>");
       expect((await bad(["guide"])).stdout).toStartWith("# Using todo from an agent");
+    });
+
+    test("prints the version without touching the database", async () => {
+      const bad = todoCli("postgres://nobody@127.0.0.1:1/none");
+      const expected = { code: 0, stdout: `todo ${pkg.version}\n`, stderr: "" };
+      expect(await bad(["--version"])).toEqual(expected);
+      expect(await bad(["-v"])).toEqual(expected);
+      expect(await bad(["add", "x", "--version"])).toEqual(expected);
     });
 
     test("switches to JSON with TODO_FORMAT", async () => {

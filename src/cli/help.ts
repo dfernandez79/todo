@@ -26,6 +26,7 @@ const OPTION_HELP: Record<OptionName, string> = {
   "db-timeout":
     "--db-timeout=<s>      Seconds to wait to connect to PostgreSQL (default: $TODO_DATABASE_TIMEOUT, or 30)",
   help: "--help, -h            Show help",
+  version: "--version, -v         Show the version",
 };
 
 const GLOBAL_OPTIONS: readonly OptionName[] = [
@@ -60,6 +61,7 @@ ${commandLines("db ", DB_COMMANDS).join("\n")}
 
 Options for every command:
 ${GLOBAL_OPTIONS.map(name => `  ${OPTION_HELP[name]}`).join("\n")}
+  ${OPTION_HELP.version}
 
 Run 'todo <command> --help' for a command's options, and 'todo guide' for a
 guide to using todo from an agent.
